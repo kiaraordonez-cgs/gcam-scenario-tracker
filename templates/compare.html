@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="detail-page">
+    <div class="detail-header">
+        <h1>🔄 Compare Input Files</h1>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Dashboard</a>
+    </div>
+
+    <div class="compare-summary">
+        <div class="compare-file">
+            <h3>{{ file1.file_name }}</h3>
+            <p><strong>Regions:</strong> {{ file1.regions_modified }}</p>
+            <p><strong>Years:</strong> {{ file1.years_modified }}</p>
+            <p><strong>Sectors:</strong> {{ file1.sectors_modified }}</p>
+        </div>
+        <div class="compare-vs">
+            <span>VS</span>
+        </div>
+        <div class="compare-file">
+            <h3>{{ file2.file_name }}</h3>
+            <p><strong>Regions:</strong> {{ file2.regions_modified }}</p>
+            <p><strong>Years:</strong> {{ file2.years_modified }}</p>
+            <p><strong>Sectors:</strong> {{ file2.sectors_modified }}</p>
+        </div>
+    </div>
+
+    {% if diff_html %}
+    <div class="diff-container">
+        <h2>File Differences</h2>
+        {{ diff_html|safe }}
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <p>One or both files have not been uploaded yet. Upload the actual XML files to see a detailed comparison.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Upload Section -->
+    <div class="upload-section">
+        <div class="upload-card">
+            <h2>📤 Upload Configuration File</h2>
+            <form action="{{ url_for('upload_config') }}" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Your Name:</label>
+                    <input type="text" name="uploaded_by" required placeholder="Enter your name">
+                </div>
+                <div class="form-group">
+                    <label>Configuration XML:</label>
+                    <input type="file" name="config_file" accept=".xml" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Upload Configuration</button>
+            </form>
+        </div>
+
+        <div class="upload-card">
+            <h2>📤 Upload Input File</h2>
+            <form action="{{ url_for('upload_input') }}" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Your Name:</label>
+                    <input type="text" name="uploaded_by" required placeholder="Enter your name">
+                </div>
+                <div class="form-group">
+                    <label>Input XML:</label>
+                    <input type="file" name="input_file" accept=".xml" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Upload Input File</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Scenarios Table -->
+    <div class="table-section">
+        <h2>📊 Scenarios</h2>
+        <div class="table-controls">
+            <input type="text" id="scenario-search" placeholder="Search scenarios..." class="search-box">
+            <select id="project-filter" class="filter-select">
+                <option value="">All Projects</option>
+                {% for project in projects %}
+                <option value="{{ project }}">{{ project }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="scenarios-table">
+                <thead>
+                    <tr>
+                        <th>Scenario Name</th>
+                        <th>Personal Name</th>
+                        <th>Project</th>
+                        <th>Date Run</th>
+                        <th>Description</th>
+                        <th>Zaratan Link</th>
+                        <th>Notes</th>
+                        <th>Uploaded By</th>
+                        <th>Upload Date</th>
+                        <th>Input Files</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for scenario in scenarios %}
+                    <tr data-id="{{ scenario.id }}" data-project="{{ scenario.project_name or '' }}">
+                        <td><a href="{{ url_for('scenario_detail', scenario_id=scenario.id) }}">{{ scenario.scenario_name }}</a></td>
+                        <td class="editable" data-field="personal_scenario_name">{{ scenario.personal_scenario_name or '' }}</td>
+                        <td class="editable-dropdown" data-field="project_name">
+                            <select class="inline-edit" onchange="updateScenario({{ scenario.id }}, 'project_name', this.value)">
+                                <option value="">Select...</option>
+                                {% for project in projects %}
+                                <option value="{{ project }}" {% if scenario.project_name == project %}selected{% endif %}>{{ project }}</option>
+                                {% endfor %}
+                                <option value="__new__">+ Add New</option>
+                            </select>
+                        </td>
+                        <td class="editable" data-field="date_run">{{ scenario.date_run or '' }}</td>
+                        <td class="editable" data-field="description">{{ scenario.description or '' }}</td>
+                        <td class="editable" data-field="zaratan_link">{{ scenario.zaratan_link or '' }}</td>
+                        <td class="editable" data-field="additional_notes">{{ scenario.additional_notes or '' }}</td>
+                        <td>{{ scenario.uploaded_by }}</td>
+                        <td>{{ scenario.upload_date[:10] }}</td>
+                        <td><span class="badge">{{ scenario.input_count }}</span></td>
+                        <td>
+                            <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn-small">Download</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Input Files Table -->
+    <div class="table-section">
+        <h2>📁 Input Files</h2>
+        <div class="table-controls">
+            <input type="text" id="input-search" placeholder="Search input files..." class="search-box">
+            <button onclick="showCompareModal()" class="btn btn-secondary">Compare Files</button>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="inputs-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all"></th>
+                        <th>File Name</th>
+                        <th>Regions Modified</th>
+                        <th>Years Modified</th>
+                        <th>Sectors Modified</th>
+                        <th>Policy Name</th>
+                        <th>Folder Location</th>
+                        <th>Description</th>
+                        <th>Notes</th>
+                        <th>Uploaded By</th>
+                        <th>Upload Date</th>
+                        <th>Used In Scenarios</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for input in input_files %}
+                    <tr data-id="{{ input.id }}">
+                        <td><input type="checkbox" class="compare-checkbox" value="{{ input.id }}"></td>
+                        <td><a href="{{ url_for('input_detail', input_id=input.id) }}">{{ input.file_name }}</a></td>
+                        <td>{{ input.regions_modified or 'N/A' }}</td>
+                        <td>{{ input.years_modified or 'N/A' }}</td>
+                        <td>{{ input.sectors_modified or 'N/A' }}</td>
+                        <td class="editable" data-field="policy_name">{{ input.policy_name or '' }}</td>
+                        <td class="editable" data-field="folder_location">{{ input.folder_location or '' }}</td>
+                        <td class="editable" data-field="description">{{ input.description or '' }}</td>
+                        <td class="editable" data-field="additional_notes">{{ input.additional_notes or '' }}</td>
+                        <td>{{ input.uploaded_by }}</td>
+                        <td>{{ input.upload_date[:10] }}</td>
+                        <td><span class="badge">{{ input.scenario_count }}</span></td>
+                        <td>
+                            {% if input.file_path %}
+                            <a href="{{ url_for('download_file', file_type='input', file_id=input.id) }}" class="btn-small">Download</a>
+                            {% else %}
+                            <span class="text-muted">No file</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Compare Modal -->
+<div id="compare-modal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Compare Input Files</h2>
+        <p>Select exactly 2 files to compare.</p>
+        <button onclick="executeCompare()" class="btn btn-primary">Compare Selected Files</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateScenario(scenarioId, field, value) {
+    if (value === '__new__') {
+        const newProject = prompt('Enter new project name:');
+        if (newProject) {
+            value = newProject;
+        } else {
+            return;
+        }
+    }
+    
+    fetch(`/update_scenario/${scenarioId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `${field}=${encodeURIComponent(value)}`
+    }).then(() => location.reload());
+}
+
+function updateInput(inputId, field, value) {
+    fetch(`/update_input/${inputId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `${field}=${encodeURIComponent(value)}`
+    });
+}
+
+// Editable cells
+document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
+    cell.addEventListener('click', function() {
+        const currentValue = this.textContent;
+        const field = this.dataset.field;
+        const scenarioId = this.closest('tr').dataset.id;
+        
+        const input = document.createElement('input');
+        input.value = currentValue;
+        input.className = 'inline-edit';
+        
+        input.addEventListener('blur', function() {
+            const newValue = this.value;
+            cell.textContent = newValue;
+            updateScenario(scenarioId, field, newValue);
+        });
+        
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                this.blur();
+            }
+        });
+        
+        this.textContent = '';
+        this.appendChild(input);
+        input.focus();
+    });
+});
+
+document.querySelectorAll('#inputs-table .editable').forEach(cell => {
+    cell.addEventListener('click', function() {
+        const currentValue = this.textContent;
+        const field = this.dataset.field;
+        const inputId = this.closest('tr').dataset.id;
+        
+        const input = document.createElement('input');
+        input.value = currentValue;
+        input.className = 'inline-edit';
+        
+        input.addEventListener('blur', function() {
+            const newValue = this.value;
+            cell.textContent = newValue;
+            updateInput(inputId, field, newValue);
+        });
+        
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                this.blur();
+            }
+        });
+        
+        this.textContent = '';
+        this.appendChild(input);
+        input.focus();
+    });
+});
+
+// Search functionality
+document.getElementById('scenario-search').addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const rows = document.querySelectorAll('#scenarios-table tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+document.getElementById('input-search').addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const rows = document.querySelectorAll('#inputs-table tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+// Project filter
+document.getElementById('project-filter').addEventListener('change', function() {
+    const filterValue = this.value;
+    const rows = document.querySelectorAll('#scenarios-table tbody tr');
+    
+    rows.forEach(row => {
+        if (!filterValue || row.dataset.project === filterValue) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+});
+
+// Compare functionality
+const modal = document.getElementById('compare-modal');
+const closeBtn = document.getElementsByClassName('close')[0];
+
+function showCompareModal() {
+    const checked = document.querySelectorAll('.compare-checkbox:checked');
+    if (checked.length !== 2) {
+        alert('Please select exactly 2 files to compare');
+        return;
+    }
+    modal.style.display = 'block';
+}
+
+function executeCompare() {
+    const checked = document.querySelectorAll('.compare-checkbox:checked');
+    if (checked.length !== 2) {
+        alert('Please select exactly 2 files to compare');
+        return;
+    }
+    
+    const id1 = checked[0].value;
+    const id2 = checked[1].value;
+    window.location.href = `/compare/${id1}/${id2}`;
+}
+
+closeBtn.onclick = function() {
+    modal.style.display = 'none';
+}
+
+window.onclick = function(event) {
+    if (event.target == modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Select all checkboxes
+document.getElementById('select-all').addEventListener('change', function() {
+    const checkboxes = document.querySelectorAll('.compare-checkbox');
+    checkboxes.forEach(cb => cb.checked = this.checked);
+});
+</script>
+{% endblock %}

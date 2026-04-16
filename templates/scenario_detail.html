@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="detail-page">
+    <div class="detail-header">
+        <h1>📊 {{ scenario.scenario_name }}</h1>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Dashboard</a>
+    </div>
+
+    <div class="detail-card">
+        <h2>Scenario Information</h2>
+        <table class="info-table">
+            <tr>
+                <th>Scenario Name:</th>
+                <td>{{ scenario.scenario_name }}</td>
+            </tr>
+            <tr>
+                <th>Personal Name:</th>
+                <td>{{ scenario.personal_scenario_name or 'Not set' }}</td>
+            </tr>
+            <tr>
+                <th>Project:</th>
+                <td>{{ scenario.project_name or 'Not set' }}</td>
+            </tr>
+            <tr>
+                <th>Date Run:</th>
+                <td>{{ scenario.date_run or 'Not set' }}</td>
+            </tr>
+            <tr>
+                <th>Description:</th>
+                <td>{{ scenario.description or 'Not set' }}</td>
+            </tr>
+            <tr>
+                <th>Zaratan Link:</th>
+                <td>
+                    {% if scenario.zaratan_link %}
+                    <a href="{{ scenario.zaratan_link }}" target="_blank">{{ scenario.zaratan_link }}</a>
+                    {% else %}
+                    Not set
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th>Additional Notes:</th>
+                <td>{{ scenario.additional_notes or 'None' }}</td>
+            </tr>
+            <tr>
+                <th>Uploaded By:</th>
+                <td>{{ scenario.uploaded_by }}</td>
+            </tr>
+            <tr>
+                <th>Upload Date:</th>
+                <td>{{ scenario.upload_date }}</td>
+            </tr>
+        </table>
+        <div class="actions">
+            <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn btn-primary">Download Configuration File</a>
+        </div>
+    </div>
+
+    <div class="detail-card">
+        <h2>Input Files ({{ input_files|length }})</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Component Key</th>
+                    <th>File Name</th>
+                    <th>Regions</th>
+                    <th>Years</th>
+                    <th>Sectors</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for input in input_files %}
+                <tr>
+                    <td><code>{{ input.component_key }}</code></td>
+                    <td><a href="{{ url_for('input_detail', input_id=input.id) }}">{{ input.file_name }}</a></td>
+                    <td>{{ input.regions_modified or 'N/A' }}</td>
+                    <td>{{ input.years_modified or 'N/A' }}</td>
+                    <td>{{ input.sectors_modified or 'N/A' }}</td>
+                    <td>
+                        {% if input.file_path %}
+                        <a href="{{ url_for('download_file', file_type='input', file_id=input.id) }}" class="btn-small">Download</a>
+                        {% else %}
+                        <span class="text-muted">No file</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
