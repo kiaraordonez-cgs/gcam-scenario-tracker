@@ -73,17 +73,23 @@ def get_google_drive_client():
     # Try environment variable first
     creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
     if creds_json:
+        print("DEBUG: Using env var for PyDrive")
         # Write to temp file for PyDrive
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             f.write(creds_json)
             temp_path = f.name
+        
+        print(f"DEBUG: Wrote temp file to {temp_path}")
         gauth.service_account_file = temp_path
+        gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
+        gauth.ServiceAuth()
+        return GoogleDrive(gauth)
     else:
+        print("DEBUG: Falling back to service-account.json file")
         gauth.service_account_file = 'service-account.json'
-    
-    gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
-    gauth.ServiceAuth()
-    return GoogleDrive(gauth)
+        gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
+        gauth.ServiceAuth()
+        return GoogleDrive(gauth)
 
 # Initialize clients
 try:
