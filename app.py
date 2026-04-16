@@ -47,6 +47,13 @@ def get_google_sheets_client():
     
     # Try environment variable first, fall back to file
     creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    
+    # DEBUG
+    print(f"DEBUG: Environment variable exists: {creds_json is not None}")
+    if creds_json:
+        print(f"DEBUG: Env var length: {len(creds_json)} characters")
+        print(f"DEBUG: Starts with: {creds_json[:50]}")
+    
     if creds_json:
         creds_dict = json.loads(creds_json)
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
