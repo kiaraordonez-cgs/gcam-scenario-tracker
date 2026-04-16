@@ -44,21 +44,23 @@ def get_google_sheets_client():
     """Initialize and return Google Sheets client"""
     import os
     import json
+    import base64
     
-    # Try environment variable first, fall back to file
-    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    
-    # DEBUG
-    print(f"DEBUG: Environment variable exists: {creds_json is not None}")
-    if creds_json:
-        print(f"DEBUG: Env var length: {len(creds_json)} characters")
-        print(f"DEBUG: Starts with: {creds_json[:50]}")
-    
-    if creds_json:
+    # Try base64 encoded env var first
+    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
+    if creds_base64:
+        print("DEBUG: Using base64 encoded credentials")
+        creds_json = base64.b64decode(creds_base64).decode('utf-8')
         creds_dict = json.loads(creds_json)
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     else:
-        creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+        # Fallback to JSON env var
+        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        if creds_json:
+            creds_dict = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
     
     return gspread.authorize(creds)
 
@@ -66,31 +68,34 @@ def get_google_drive_client():
     """Initialize and return Google Drive client"""
     import os
     import json
+    import base64
     import tempfile
     
     gauth = GoogleAuth()
     
-    # Try environment variable first
-    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    # Try base64 encoded env var first
+    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
+    creds_json = None
+    
+    if creds_base64:
+        print("DEBUG: Using base64 for PyDrive")
+        creds_json = base64.b64decode(creds_base64).decode('utf-8')
+    else:
+        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    
     if creds_json:
-        print("DEBUG: Using env var for PyDrive")
         # Write to temp file for PyDrive
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             f.write(creds_json)
             temp_path = f.name
         
-        print(f"DEBUG: Wrote temp file to {temp_path}")
         gauth.service_account_file = temp_path
-        gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
-        gauth.ServiceAuth()
-        return GoogleDrive(gauth)
     else:
-        print("DEBUG: Falling back to service-account.json file")
         gauth.service_account_file = 'service-account.json'
-        gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
-        gauth.ServiceAuth()
-        return GoogleDrive(gauth)
-
+    
+    gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
+    gauth.ServiceAuth()
+    return GoogleDrive(gauth)
 # Initialize clients
 try:
     gc = get_google_sheets_client()
