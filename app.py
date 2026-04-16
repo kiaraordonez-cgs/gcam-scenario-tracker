@@ -42,16 +42,38 @@ ALLOWED_EXTENSIONS = {'xml'}
 
 def get_google_sheets_client():
     """Initialize and return Google Sheets client"""
-    creds = Credentials.from_service_account_file(
-        'service-account.json',
-        scopes=SCOPES
-    )
+    import os
+    import json
+    
+    # Try environment variable first, fall back to file
+    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+    
     return gspread.authorize(creds)
 
 def get_google_drive_client():
     """Initialize and return Google Drive client"""
+    import os
+    import json
+    import tempfile
+    
     gauth = GoogleAuth()
-    gauth.service_account_file = 'service-account.json'
+    
+    # Try environment variable first
+    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    if creds_json:
+        # Write to temp file for PyDrive
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(creds_json)
+            temp_path = f.name
+        gauth.service_account_file = temp_path
+    else:
+        gauth.service_account_file = 'service-account.json'
+    
     gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
     gauth.ServiceAuth()
     return GoogleDrive(gauth)
