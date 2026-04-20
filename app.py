@@ -7,6 +7,7 @@ A Flask app that stores data in Google Sheets and files in Google Drive
 import os
 import json
 import difflib
+import uuid
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
@@ -387,7 +388,7 @@ def upload_config():
         return redirect(url_for('index'))
     
     file = request.files['config_file']
-    uploaded_by = request.form.get('uploaded_by', 'Unknown')
+    uploaded_by = request.form.get('uploaded_by', '')  # Empty by default
     
     if file.filename == '':
         flash('No file selected', 'error')
@@ -412,8 +413,8 @@ def upload_config():
         # Parse configuration
         parsed = parse_configuration_xml(file_content)
         
-        # Add scenario to sheet
-        scenario_id = get_next_id(scenarios_sheet)
+        # Add scenario to sheet with UUID
+        scenario_id = str(uuid.uuid4())[:8]  # Short unique ID (8 chars)
         upload_date = datetime.now().isoformat()
         
         scenarios_sheet.append_row([
@@ -556,11 +557,11 @@ def upload_input():
     
     return redirect(url_for('index'))
 
-@app.route('/update_scenario/<int:scenario_id>', methods=['POST'])
+@app.route('/update_scenario/<scenario_id>', methods=['POST'])
 def update_scenario(scenario_id):
     """Update scenario metadata"""
     try:
-        row = find_row_by_id(scenarios_sheet, scenario_id)
+        row = find_row_by_value(scenarios_sheet, 'id', scenario_id)
         if not row:
             return jsonify({'status': 'error', 'message': 'Scenario not found'}), 404
         
@@ -579,6 +580,8 @@ def update_scenario(scenario_id):
             scenarios_sheet.update_cell(row, 7, data['zaratan_link'])
         if 'additional_notes' in data:
             scenarios_sheet.update_cell(row, 8, data['additional_notes'])
+        if 'uploaded_by' in data:
+            scenarios_sheet.update_cell(row, 9, data['uploaded_by'])
         
         return jsonify({'status': 'success'})
     except Exception as e:
@@ -608,7 +611,7 @@ def update_input(input_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/scenario/<int:scenario_id>')
+@app.route('/scenario/<scenario_id>')
 def scenario_detail(scenario_id):
     """View scenario details"""
     scenario = get_scenario_by_id(scenario_id)
@@ -654,7 +657,7 @@ def compare_inputs(id1, id2):
                          diff_html=diff_html,
                          message="Input file contents are not stored. Only metadata is tracked.")
 
-@app.route('/download/<path:file_type>/<int:file_id>')
+@app.route('/download/<path:file_type>/<file_id>')
 def download_file(file_type, file_id):
     """Download a file from Google Sheets"""
     try:
@@ -692,6 +695,51 @@ def download_file(file_type, file_id):
     except Exception as e:
         flash(f'Error: {str(e)}', 'error')
         return redirect(url_for('index'))
+
+@app.route('/delete_scenario/<scenario_id>', methods=['POST'])
+def delete_scenario(scenario_id):
+    """Delete a scenario and its junction records"""
+    try:
+        # Find scenario row
+        scenario_row = find_row_by_value(scenarios_sheet, 'id', scenario_id)
+        
+        if not scenario_row:
+            return jsonify({'success': False, 'error': 'Scenario not found'})
+        
+        # Get config_file_id before deleting
+        scenario_data = scenarios_sheet.row_values(scenario_row)
+        config_file_id = scenario_data[10] if len(scenario_data) > 10 else None
+        
+        # Delete from FileStorage if config exists
+        if config_file_id:
+            try:
+                file_row = find_row_by_value(file_storage_sheet, 'file_id', config_file_id)
+                if file_row:
+                    file_storage_sheet.delete_rows(file_row)
+            except Exception as e:
+                print(f"Error deleting file from storage: {e}")
+        
+        # Delete scenario row
+        scenarios_sheet.delete_rows(scenario_row)
+        
+        # Delete junction records (scenario-input links)
+        # Get all junction records
+        all_junctions = junction_sheet.get_all_records()
+        rows_to_delete = []
+        
+        for idx, record in enumerate(all_junctions, start=2):  # Start at 2 (skip header)
+            if str(record.get('scenario_id')) == str(scenario_id):
+                rows_to_delete.append(idx)
+        
+        # Delete in reverse order to maintain row numbers
+        for row_num in reversed(rows_to_delete):
+            junction_sheet.delete_rows(row_num)
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        print(f"Error deleting scenario: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 # =============================================================================
 # Main

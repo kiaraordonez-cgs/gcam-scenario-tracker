@@ -48,12 +48,14 @@
                 <option value="{{ project }}">{{ project }}</option>
                 {% endfor %}
             </select>
+            <button onclick="showCompareModal()" class="btn-upload" style="margin-left: auto;">Compare Selected</button>
         </div>
         
         <div class="table-wrapper">
             <table class="data-table" id="scenarios-table">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="select-all-scenarios"></th>
                         <th>Scenario Name</th>
                         <th>Personal Name</th>
                         <th>Project</th>
@@ -70,6 +72,7 @@
                 <tbody>
                     {% for scenario in scenarios %}
                     <tr data-id="{{ scenario.id }}" data-project="{{ scenario.project_name or '' }}">
+                        <td><input type="checkbox" class="compare-checkbox" value="{{ scenario.id }}"></td>
                         <td><a href="{{ url_for('scenario_detail', scenario_id=scenario.id) }}">{{ scenario.scenario_name }}</a></td>
                         <td class="editable" data-field="personal_scenario_name">{{ scenario.personal_scenario_name or '' }}</td>
                         <td class="editable-dropdown" data-field="project_name">
@@ -85,11 +88,12 @@
                         <td class="editable" data-field="description">{{ scenario.description or '' }}</td>
                         <td class="editable" data-field="zaratan_link">{{ scenario.zaratan_link or '' }}</td>
                         <td class="editable" data-field="additional_notes">{{ scenario.additional_notes or '' }}</td>
-                        <td>{{ scenario.uploaded_by }}</td>
+                        <td class="editable" data-field="uploaded_by">{{ scenario.uploaded_by or '' }}</td>
                         <td>{{ scenario.upload_date[:10] }}</td>
                         <td><span class="badge">{{ scenario.input_count }}</span></td>
                         <td>
                             <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn-small">Download</a>
+                            <button onclick="deleteScenario({{ scenario.id }}, '{{ scenario.scenario_name }}')" class="btn-small btn-danger">🗑️</button>
                         </td>
                     </tr>
                     {% endfor %}

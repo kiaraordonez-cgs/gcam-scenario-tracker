@@ -304,6 +304,17 @@ body {
     color: white;
 }
 
+.btn-danger {
+    background: #ef4444;
+    color: white;
+    border: none;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+    color: white;
+}
+
 .btn-secondary {
     padding: 10px 20px;
     background: white;
