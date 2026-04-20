@@ -102,13 +102,11 @@
     <div class="tab-content" id="inputs-tab">
         <div class="table-controls">
             <input type="text" id="input-search" placeholder="🔍 Search input files..." class="search-box">
-            <button onclick="showCompareModal()" class="btn btn-secondary">Compare Files</button>
         </div>
         <div class="table-wrapper">
             <table class="data-table" id="inputs-table">
                 <thead>
                     <tr>
-                        <th><input type="checkbox" id="select-all"></th>
                         <th>File Name</th>
                         <th>Regions Modified</th>
                         <th>Years Modified</th>
@@ -126,7 +124,6 @@
                 <tbody>
                     {% for input in input_files %}
                     <tr data-id="{{ input.id }}">
-                        <td><input type="checkbox" class="compare-checkbox" value="{{ input.id }}"></td>
                         <td><a href="{{ url_for('input_detail', input_id=input.id) }}">{{ input.file_name }}</a></td>
                         <td>{{ input.regions_modified or 'N/A' }}</td>
                         <td>{{ input.years_modified or 'N/A' }}</td>
