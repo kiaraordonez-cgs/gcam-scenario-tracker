@@ -42,16 +42,57 @@ ALLOWED_EXTENSIONS = {'xml'}
 
 def get_google_sheets_client():
     """Initialize and return Google Sheets client"""
-    creds = Credentials.from_service_account_file(
-        'service-account.json',
-        scopes=SCOPES
-    )
+    import os
+    import json
+    import base64
+    
+    # Try base64 encoded env var first
+    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
+    if creds_base64:
+        print("DEBUG: Using base64 encoded credentials")
+        creds_json = base64.b64decode(creds_base64).decode('utf-8')
+        creds_dict = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    else:
+        # Fallback to JSON env var
+        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        if creds_json:
+            creds_dict = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+    
     return gspread.authorize(creds)
 
 def get_google_drive_client():
     """Initialize and return Google Drive client"""
+    import os
+    import json
+    import base64
+    import tempfile
+    
     gauth = GoogleAuth()
-    gauth.service_account_file = 'service-account.json'
+    
+    # Try base64 encoded env var first
+    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
+    creds_json = None
+    
+    if creds_base64:
+        print("DEBUG: Using base64 for PyDrive")
+        creds_json = base64.b64decode(creds_base64).decode('utf-8')
+    else:
+        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    
+    if creds_json:
+        # Write to temp file for PyDrive
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(creds_json)
+            temp_path = f.name
+        
+        gauth.service_account_file = temp_path
+    else:
+        gauth.service_account_file = 'service-account.json'
+    
     gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
     gauth.ServiceAuth()
     return GoogleDrive(gauth)
