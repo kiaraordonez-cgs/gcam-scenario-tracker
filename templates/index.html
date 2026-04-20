@@ -2,44 +2,46 @@
 
 {% block content %}
 <div class="dashboard">
-    <!-- Upload Section -->
-    <div class="upload-section">
-        <div class="upload-card">
-            <h2>📤 Upload Configuration File</h2>
-            <form action="{{ url_for('upload_config') }}" method="POST" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label>Your Name:</label>
-                    <input type="text" name="uploaded_by" required placeholder="Enter your name">
-                </div>
-                <div class="form-group">
-                    <label>Configuration XML:</label>
-                    <input type="file" name="config_file" accept=".xml" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Upload Configuration</button>
+    <!-- Compact Header with Upload Actions -->
+    <div class="action-bar">
+        <div class="action-buttons">
+            <form action="{{ url_for('upload_config') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
+                <input type="hidden" name="uploaded_by" value="User">
+                <label class="btn-upload">
+                    📤 Upload Configuration
+                    <input type="file" name="config_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
+                </label>
             </form>
-        </div>
-
-        <div class="upload-card">
-            <h2>📤 Upload Input File</h2>
-            <form action="{{ url_for('upload_input') }}" method="POST" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label>Your Name:</label>
-                    <input type="text" name="uploaded_by" required placeholder="Enter your name">
-                </div>
-                <div class="form-group">
-                    <label>Input XML:</label>
-                    <input type="file" name="input_file" accept=".xml" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Upload Input File</button>
+            
+            <form action="{{ url_for('upload_input') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
+                <input type="hidden" name="uploaded_by" value="User">
+                <label class="btn-upload">
+                    📤 Upload Input File
+                    <input type="file" name="input_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
+                </label>
             </form>
         </div>
     </div>
 
-    <!-- Scenarios Table -->
-    <div class="table-section">
-        <h2>📊 Scenarios</h2>
+    <!-- Tab Navigation -->
+    <div class="tab-navigation">
+        <button class="tab-btn active" data-tab="scenarios">
+            <span class="tab-icon">📊</span>
+            Scenarios
+            <span class="tab-count">{{ scenarios|length }}</span>
+        </button>
+        <button class="tab-btn" data-tab="inputs">
+            <span class="tab-icon">📄</span>
+            Input Files
+            <span class="tab-count">{{ input_files|length }}</span>
+        </button>
+    </div>
+
+
+    <!-- Scenarios Tab Content -->
+    <div class="tab-content active" id="scenarios-tab">
         <div class="table-controls">
-            <input type="text" id="scenario-search" placeholder="Search scenarios..." class="search-box">
+            <input type="text" id="scenario-search" placeholder="🔍 Search scenarios..." class="search-box">
             <select id="project-filter" class="filter-select">
                 <option value="">All Projects</option>
                 {% for project in projects %}
@@ -47,6 +49,7 @@
                 {% endfor %}
             </select>
         </div>
+        
         <div class="table-wrapper">
             <table class="data-table" id="scenarios-table">
                 <thead>
@@ -95,11 +98,10 @@
         </div>
     </div>
 
-    <!-- Input Files Table -->
-    <div class="table-section">
-        <h2>📁 Input Files</h2>
+    <!-- Input Files Tab Content -->
+    <div class="tab-content" id="inputs-tab">
         <div class="table-controls">
-            <input type="text" id="input-search" placeholder="Search input files..." class="search-box">
+            <input type="text" id="input-search" placeholder="🔍 Search input files..." class="search-box">
             <button onclick="showCompareModal()" class="btn btn-secondary">Compare Files</button>
         </div>
         <div class="table-wrapper">
@@ -324,6 +326,27 @@ window.onclick = function(event) {
 document.getElementById('select-all').addEventListener('change', function() {
     const checkboxes = document.querySelectorAll('.compare-checkbox');
     checkboxes.forEach(cb => cb.checked = this.checked);
+});
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const tabName = this.dataset.tab;
+        
+        // Hide all tab contents
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        
+        // Remove active from all tabs
+        document.querySelectorAll('.tab-btn').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        // Show selected tab
+        document.getElementById(tabName + '-tab').classList.add('active');
+        this.classList.add('active');
+    });
 });
 </script>
 {% endblock %}

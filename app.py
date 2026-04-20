@@ -14,9 +14,8 @@ from werkzeug.utils import secure_filename
 from lxml import etree
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
-import io
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 
 # =============================================================================
 # Configuration
@@ -32,8 +31,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
-GOOGLE_SHEET_ID = '1svIAFCtbWXFAgikFPRW8oMQTJbK-hOAKXehrYhP49ag'
-GOOGLE_DRIVE_FOLDER_ID = '1JvhWQa2H3jXP8r6BtYEG6pGCCIZDMrDP'
+GOOGLE_SHEET_ID = '1n1dwcHThv_I19lWkuNhAK5rlscnyMGlM2x-VoR4R8rs'
+GOOGLE_DRIVE_FOLDER_ID = '1RY61HJn1nWGsOlbjBE1lnbsEIH16TTfR'
 
 ALLOWED_EXTENSIONS = {'xml'}
 
@@ -43,52 +42,20 @@ ALLOWED_EXTENSIONS = {'xml'}
 
 def get_google_sheets_client():
     """Initialize and return Google Sheets client"""
-    import os
-    import json
-    import base64
-    
-    # Try base64 encoded env var first
-    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
-    if creds_base64:
-        print("DEBUG: Using base64 encoded credentials")
-        creds_json = base64.b64decode(creds_base64).decode('utf-8')
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    else:
-        # Fallback to JSON env var
-        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-        if creds_json:
-            creds_dict = json.loads(creds_json)
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-        else:
-            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
-    
+    creds = Credentials.from_service_account_file(
+        'service-account.json',
+        scopes=SCOPES
+    )
     return gspread.authorize(creds)
 
 def get_google_drive_client():
     """Initialize and return Google Drive client"""
-    import os
-    import json
-    import base64
-    
-    # Get credentials
-    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
-    
-    if creds_base64:
-        print("DEBUG: Using base64 for Drive API")
-        creds_json = base64.b64decode(creds_base64).decode('utf-8')
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    else:
-        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-        if creds_json:
-            creds_dict = json.loads(creds_json)
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-        else:
-            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
-    
-    return build('drive', 'v3', credentials=creds)
-    
+    gauth = GoogleAuth()
+    gauth.service_account_file = 'service-account.json'
+    gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
+    gauth.ServiceAuth()
+    return GoogleDrive(gauth)
+
 # Initialize clients
 try:
     gc = get_google_sheets_client()
@@ -242,24 +209,15 @@ def upload_to_drive(file_content, filename):
     """Upload file to Google Drive and return file ID"""
     try:
         file_metadata = {
-            'name': filename,
-            'parents': [GOOGLE_DRIVE_FOLDER_ID]
+            'title': filename,
+            'parents': [{'id': GOOGLE_DRIVE_FOLDER_ID}]
         }
         
-        media = MediaIoBaseUpload(
-            io.BytesIO(file_content.encode('utf-8')),
-            mimetype='application/xml',
-            resumable=True
-        )
+        gfile = drive.CreateFile(file_metadata)
+        gfile.SetContentString(file_content)
+        gfile.Upload()
         
-        file = drive.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-        
-        print(f"DEBUG: Uploaded file {filename}, ID: {file.get('id')}")
-        return file.get('id')
+        return gfile['id']
     except Exception as e:
         print(f"Error uploading to Drive: {e}")
         return None
@@ -267,15 +225,9 @@ def upload_to_drive(file_content, filename):
 def download_from_drive(file_id):
     """Download file content from Google Drive"""
     try:
-        request = drive.files().get_media(fileId=file_id)
-        file_content = io.BytesIO()
-        downloader = MediaIoBaseDownload(file_content, request)
-        
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        
-        return file_content.getvalue().decode('utf-8')
+        gfile = drive.CreateFile({'id': file_id})
+        gfile.FetchMetadata()
+        return gfile.GetContentString()
     except Exception as e:
         print(f"Error downloading from Drive: {e}")
         return None
