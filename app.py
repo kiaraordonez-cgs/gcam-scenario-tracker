@@ -7,6 +7,7 @@ A Flask app that stores data in Google Sheets and files in Google Drive
 import os
 import json
 import difflib
+import io
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
@@ -14,8 +15,8 @@ from werkzeug.utils import secure_filename
 from lxml import etree
 import gspread
 from google.oauth2.service_account import Credentials
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 
 # =============================================================================
 # Configuration
@@ -69,33 +70,24 @@ def get_google_drive_client():
     import os
     import json
     import base64
-    import tempfile
     
-    gauth = GoogleAuth()
-    
-    # Try base64 encoded env var first
+    # Get credentials
     creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
-    creds_json = None
     
     if creds_base64:
-        print("DEBUG: Using base64 for PyDrive")
+        print("DEBUG: Using base64 for Drive API")
         creds_json = base64.b64decode(creds_base64).decode('utf-8')
+        creds_dict = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     else:
         creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        if creds_json:
+            creds_dict = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
     
-    if creds_json:
-        # Write to temp file for PyDrive
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write(creds_json)
-            temp_path = f.name
-        
-        gauth.service_account_file = temp_path
-    else:
-        gauth.service_account_file = 'service-account.json'
-    
-    gauth.service_account_email = 'gcam-scenario-tracker-service@gcam-scenario-tracker.iam.gserviceaccount.com'
-    gauth.ServiceAuth()
-    return GoogleDrive(gauth)
+    return build('drive', 'v3', credentials=creds)
 
 # Initialize clients
 try:
@@ -250,15 +242,24 @@ def upload_to_drive(file_content, filename):
     """Upload file to Google Drive and return file ID"""
     try:
         file_metadata = {
-            'title': filename,
-            'parents': [{'id': GOOGLE_DRIVE_FOLDER_ID}]
+            'name': filename,
+            'parents': [GOOGLE_DRIVE_FOLDER_ID]
         }
         
-        gfile = drive.CreateFile(file_metadata)
-        gfile.SetContentString(file_content)
-        gfile.Upload()
+        media = MediaIoBaseUpload(
+            io.BytesIO(file_content.encode('utf-8')),
+            mimetype='application/xml',
+            resumable=True
+        )
         
-        return gfile['id']
+        file = drive.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
+        print(f"DEBUG: Uploaded file {filename}, ID: {file.get('id')}")
+        return file.get('id')
     except Exception as e:
         print(f"Error uploading to Drive: {e}")
         return None
@@ -266,9 +267,15 @@ def upload_to_drive(file_content, filename):
 def download_from_drive(file_id):
     """Download file content from Google Drive"""
     try:
-        gfile = drive.CreateFile({'id': file_id})
-        gfile.FetchMetadata()
-        return gfile.GetContentString()
+        request = drive.files().get_media(fileId=file_id)
+        file_content = io.BytesIO()
+        downloader = MediaIoBaseDownload(file_content, request)
+        
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        
+        return file_content.getvalue().decode('utf-8')
     except Exception as e:
         print(f"Error downloading from Drive: {e}")
         return None
