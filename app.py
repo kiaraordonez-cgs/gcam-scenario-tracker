@@ -431,17 +431,29 @@ def upload_config():
             len(parsed['input_files'])
         ])
         
-        # Process input files
+        # Process input files in batch to avoid rate limits
+        # First, get all existing input file names in one call
+        existing_files = {}
+        try:
+            all_inputs = inputs_sheet.get_all_records()
+            for inp in all_inputs:
+                existing_files[inp['file_name']] = inp['id']
+        except:
+            pass
+        
+        # Prepare batch data for new files and junctions
+        new_files_to_add = []
+        junctions_to_add = []
+        next_input_id = get_next_id(inputs_sheet)
+        
         for input_file in parsed['input_files']:
-            # Check if input file already exists
-            existing_row = find_row_by_value(inputs_sheet, 'file_name', input_file['file_name'])
-            
-            if existing_row:
-                input_id = inputs_sheet.cell(existing_row, 1).value
+            # Check if exists
+            if input_file['file_name'] in existing_files:
+                input_id = existing_files[input_file['file_name']]
             else:
-                # Create new input file record
-                input_id = get_next_id(inputs_sheet)
-                inputs_sheet.append_row([
+                # Prepare to add new
+                input_id = next_input_id
+                new_files_to_add.append([
                     input_id,
                     input_file['file_name'],
                     'Not analyzed',
@@ -453,15 +465,25 @@ def upload_config():
                     '',  # additional_notes
                     'Auto-detected',
                     upload_date,
-                    ''   # file_id (will be filled when actual file uploaded)
+                    ''   # file_id
                 ])
+                existing_files[input_file['file_name']] = input_id
+                next_input_id += 1
             
-            # Link scenario to input file
-            junction_sheet.append_row([
+            # Prepare junction
+            junctions_to_add.append([
                 scenario_id,
                 input_id,
                 input_file['component_key']
             ])
+        
+        # Batch add new input files (single API call)
+        if new_files_to_add:
+            inputs_sheet.append_rows(new_files_to_add)
+        
+        # Batch add junctions (single API call)
+        if junctions_to_add:
+            junction_sheet.append_rows(junctions_to_add)
         
         flash(f'Successfully uploaded scenario "{parsed["scenario_name"]}" with {len(parsed["input_files"])} input files', 'success')
         
