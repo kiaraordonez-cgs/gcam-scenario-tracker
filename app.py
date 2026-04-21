@@ -747,6 +747,65 @@ def download_file(file_type, file_id):
         flash(f'Error: {str(e)}', 'error')
         return redirect(url_for('index'))
 
+@app.route('/migrate_folder_locations')
+def migrate_folder_locations():
+    """One-time migration to populate folder_location for existing input files"""
+    if not sheets_available():
+        return jsonify({'error': 'Sheets not available'}), 503
+    
+    try:
+        # Get all scenarios with their config files
+        scenarios = scenarios_sheet.get_all_records()
+        junction_records = junction_sheet.get_all_records()
+        
+        updated_count = 0
+        
+        for scenario in scenarios:
+            config_file_id = scenario.get('config_file_id')
+            if not config_file_id:
+                continue
+            
+            # Get the config file content
+            config_content = download_file_from_sheet(config_file_id)
+            if not config_content:
+                continue
+            
+            # Parse it
+            parsed = parse_configuration_xml(config_content)
+            
+            # Build a map of filename -> folder_location
+            file_folder_map = {}
+            for input_file in parsed['input_files']:
+                file_folder_map[input_file['file_name']] = input_file.get('folder_location', '')
+            
+            # Get input files for this scenario
+            scenario_id = scenario['id']
+            linked_input_ids = [j['input_file_id'] for j in junction_records if str(j['scenario_id']) == str(scenario_id)]
+            
+            # Update each input file's folder_location
+            input_records = inputs_sheet.get_all_records()
+            for i, input_rec in enumerate(input_records, start=2):  # Start at row 2 (after header)
+                if str(input_rec['id']) in [str(iid) for iid in linked_input_ids]:
+                    file_name = input_rec['file_name']
+                    if file_name in file_folder_map:
+                        folder_loc = file_folder_map[file_name]
+                        # Update column 7 (folder_location)
+                        inputs_sheet.update_cell(i, 7, folder_loc)
+                        updated_count += 1
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Updated folder locations for {updated_count} input files'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/test_compare')
+def test_compare():
+    """Test endpoint to verify routing works"""
+    return jsonify({'status': 'ok', 'message': 'Comparison routing is working!'})
+
 @app.route('/compare_scenarios')
 def compare_scenarios():
     """Compare multiple scenarios and generate a report"""

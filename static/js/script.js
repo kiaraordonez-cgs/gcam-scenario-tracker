@@ -65,8 +65,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Table Sorting Setup
     document.querySelectorAll('th.sortable').forEach((header) => {
+        // Make it obvious these are clickable
         header.style.cursor = 'pointer';
+        header.title = 'Click to sort';
+        
         header.addEventListener('click', function() {
+            console.log('Sorting column:', this.textContent);
             const table = this.closest('table');
             const tbody = table.querySelector('tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
@@ -74,6 +78,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Determine if this column is currently sorted
             const currentSort = this.dataset.sort || 'none';
             const newSort = currentSort === 'asc' ? 'desc' : 'asc';
+            console.log('Sort direction:', newSort);
             
             // Reset all headers in this table
             table.querySelectorAll('th.sortable').forEach(th => {
@@ -111,6 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Re-append rows in new order
             rows.forEach(row => tbody.appendChild(row));
+            console.log('Sorted', rows.length, 'rows');
         });
     });
 });
@@ -118,6 +124,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // Compare scenarios modal
 function showCompareModal() {
     const checkboxes = document.querySelectorAll('.compare-checkbox:checked');
+    console.log('Compare button clicked, found checkboxes:', checkboxes.length);
+    
     if (checkboxes.length < 2) {
         alert('Please select at least 2 scenarios to compare');
         return;
@@ -125,9 +133,13 @@ function showCompareModal() {
     
     // Get all selected scenario IDs
     const scenarioIds = Array.from(checkboxes).map(cb => cb.value);
+    console.log('Scenario IDs:', scenarioIds);
     
     // Redirect to comparison page
-    window.location.href = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
+    const url = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
+    console.log('Redirecting to:', url);
+    window.location.href = url;
+}
 }
 
 // Delete scenario
