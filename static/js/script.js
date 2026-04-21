@@ -1,11 +1,14 @@
-// Tab Switching
+// Tab Switching and Setup
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('GCAM Scenario Tracker loaded');
+    
     // Tab switching functionality
     const tabButtons = document.querySelectorAll('.tab-btn');
     
     tabButtons.forEach(button => {
         button.addEventListener('click', function() {
             const tabName = this.getAttribute('data-tab');
+            console.log('Switching to tab:', tabName);
             
             // Remove active class from all buttons and content
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -18,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Search functionality for scenarios
+    const scenarioSearch = document.getElementById('scenario-search');
     if (scenarioSearch) {
         scenarioSearch.addEventListener('input', function(e) {
             const searchTerm = e.target.value.toLowerCase();
@@ -64,6 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Table Sorting Setup
+    console.log('Setting up table sorting...');
     document.querySelectorAll('th.sortable').forEach((header) => {
         // Make it obvious these are clickable
         header.style.cursor = 'pointer';
@@ -119,6 +124,8 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('Sorted', rows.length, 'rows');
         });
     });
+    
+    console.log('Setup complete');
 });
 
 // Compare scenarios modal
@@ -139,7 +146,6 @@ function showCompareModal() {
     const url = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
     console.log('Redirecting to:', url);
     window.location.href = url;
-}
 }
 
 // Delete scenario
@@ -165,5 +171,3 @@ function deleteScenario(scenarioId, scenarioName) {
         alert('Error deleting scenario: ' + error);
     });
 }
-
-console.log('GCAM Scenario Tracker loaded');

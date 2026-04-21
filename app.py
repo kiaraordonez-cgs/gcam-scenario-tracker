@@ -757,8 +757,10 @@ def migrate_folder_locations():
         # Get all scenarios with their config files
         scenarios = scenarios_sheet.get_all_records()
         junction_records = junction_sheet.get_all_records()
+        input_records = inputs_sheet.get_all_records()
         
-        updated_count = 0
+        # Build a complete map of filename -> folder_location from all configs
+        file_folder_map = {}
         
         for scenario in scenarios:
             config_file_id = scenario.get('config_file_id')
@@ -773,25 +775,33 @@ def migrate_folder_locations():
             # Parse it
             parsed = parse_configuration_xml(config_content)
             
-            # Build a map of filename -> folder_location
-            file_folder_map = {}
+            # Add to map (later configs will override if same filename)
             for input_file in parsed['input_files']:
                 file_folder_map[input_file['file_name']] = input_file.get('folder_location', '')
+        
+        # Now batch update all input files
+        updates = []
+        for i, input_rec in enumerate(input_records, start=2):  # Start at row 2 (after header)
+            file_name = input_rec['file_name']
+            if file_name in file_folder_map:
+                folder_loc = file_folder_map[file_name]
+                # Prepare batch update (row, col 7, value)
+                updates.append({
+                    'range': f'InputFiles!G{i}',  # Column G = folder_location
+                    'values': [[folder_loc]]
+                })
+        
+        # Batch update (max 60 per call to avoid rate limit)
+        updated_count = 0
+        batch_size = 50
+        
+        for i in range(0, len(updates), batch_size):
+            batch = updates[i:i+batch_size]
             
-            # Get input files for this scenario
-            scenario_id = scenario['id']
-            linked_input_ids = [j['input_file_id'] for j in junction_records if str(j['scenario_id']) == str(scenario_id)]
-            
-            # Update each input file's folder_location
-            input_records = inputs_sheet.get_all_records()
-            for i, input_rec in enumerate(input_records, start=2):  # Start at row 2 (after header)
-                if str(input_rec['id']) in [str(iid) for iid in linked_input_ids]:
-                    file_name = input_rec['file_name']
-                    if file_name in file_folder_map:
-                        folder_loc = file_folder_map[file_name]
-                        # Update column 7 (folder_location)
-                        inputs_sheet.update_cell(i, 7, folder_loc)
-                        updated_count += 1
+            # Use batch_update instead of individual updates
+            inputs_sheet.batch_update(batch)
+            updated_count += len(batch)
+            print(f"Updated batch {i//batch_size + 1}, total: {updated_count}")
         
         return jsonify({
             'status': 'success',
