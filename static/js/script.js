@@ -1,25 +1,23 @@
 // Tab Switching
-function switchTab(tabName) {
-    // Hide all tab content
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-    });
-    
-    // Remove active class from all buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
-    // Show selected tab
-    document.getElementById(tabName + '-tab').classList.add('active');
-    
-    // Highlight selected button
-    event.target.classList.add('active');
-}
-
-// Search functionality for scenarios
 document.addEventListener('DOMContentLoaded', function() {
-    const scenarioSearch = document.getElementById('scenario-search');
+    // Tab switching functionality
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const tabName = this.getAttribute('data-tab');
+            
+            // Remove active class from all buttons and content
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            // Add active class to clicked button and corresponding content
+            this.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+        });
+    });
+    
+    // Search functionality for scenarios
     if (scenarioSearch) {
         scenarioSearch.addEventListener('input', function(e) {
             const searchTerm = e.target.value.toLowerCase();
@@ -69,17 +67,16 @@ document.addEventListener('DOMContentLoaded', function() {
 // Compare scenarios modal
 function showCompareModal() {
     const checkboxes = document.querySelectorAll('.compare-checkbox:checked');
-    if (checkboxes.length !== 2) {
-        alert('Please select exactly 2 scenarios to compare');
+    if (checkboxes.length < 2) {
+        alert('Please select at least 2 scenarios to compare');
         return;
     }
     
-    const id1 = checkboxes[0].value;
-    const id2 = checkboxes[1].value;
+    // Get all selected scenario IDs
+    const scenarioIds = Array.from(checkboxes).map(cb => cb.value);
     
-    // For now, just show which scenarios would be compared
-    // In future, could open actual comparison view
-    alert(`Compare scenario ${id1} with scenario ${id2}\n\nComparison feature coming soon!`);
+    // Redirect to comparison page
+    window.location.href = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
 }
 
 // Delete scenario

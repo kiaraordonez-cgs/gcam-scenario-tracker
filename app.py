@@ -696,6 +696,158 @@ def download_file(file_type, file_id):
         flash(f'Error: {str(e)}', 'error')
         return redirect(url_for('index'))
 
+@app.route('/compare_scenarios')
+def compare_scenarios():
+    """Compare multiple scenarios and generate a report"""
+    try:
+        scenario_ids = request.args.get('ids', '').split(',')
+        
+        if len(scenario_ids) < 2:
+            flash('Please select at least 2 scenarios to compare', 'error')
+            return redirect(url_for('index'))
+        
+        # Get all scenarios
+        scenarios = []
+        for scenario_id in scenario_ids:
+            scenario = get_scenario_by_id(scenario_id)
+            if scenario:
+                # Get input files for this scenario
+                input_files = get_input_files_for_scenario(scenario_id)
+                scenario['input_file_names'] = set([f['file_name'] for f in input_files])
+                scenarios.append(scenario)
+        
+        if len(scenarios) < 2:
+            flash('Could not find all selected scenarios', 'error')
+            return redirect(url_for('index'))
+        
+        # Generate comparison report
+        report_lines = []
+        report_lines.append("=" * 80)
+        report_lines.append("GCAM SCENARIO COMPARISON REPORT")
+        report_lines.append("=" * 80)
+        report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        report_lines.append(f"Number of scenarios compared: {len(scenarios)}")
+        report_lines.append("")
+        
+        # Section 1: Scenario Overview
+        report_lines.append("-" * 80)
+        report_lines.append("SCENARIO OVERVIEW")
+        report_lines.append("-" * 80)
+        for i, scenario in enumerate(scenarios, 1):
+            report_lines.append(f"\n{i}. {scenario['scenario_name']}")
+            report_lines.append(f"   ID: {scenario['id']}")
+            if scenario.get('project_name'):
+                report_lines.append(f"   Project: {scenario['project_name']}")
+            if scenario.get('date_run'):
+                report_lines.append(f"   Date Run: {scenario['date_run']}")
+            report_lines.append(f"   Number of Input Files: {len(scenario['input_file_names'])}")
+            if scenario.get('description'):
+                report_lines.append(f"   Description: {scenario['description']}")
+        
+        report_lines.append("")
+        
+        # Section 2: Input Files Comparison
+        report_lines.append("-" * 80)
+        report_lines.append("INPUT FILES COMPARISON")
+        report_lines.append("-" * 80)
+        
+        # Get all unique files across all scenarios
+        all_files = set()
+        for scenario in scenarios:
+            all_files.update(scenario['input_file_names'])
+        
+        # Files shared by ALL scenarios
+        shared_files = set.intersection(*[s['input_file_names'] for s in scenarios])
+        
+        report_lines.append(f"\nTotal unique input files across all scenarios: {len(all_files)}")
+        report_lines.append(f"Files shared by ALL scenarios: {len(shared_files)}")
+        
+        if shared_files:
+            report_lines.append("\nShared Files:")
+            for file in sorted(shared_files):
+                report_lines.append(f"  - {file}")
+        
+        # Files unique to each scenario
+        report_lines.append("\n" + "-" * 80)
+        report_lines.append("UNIQUE FILES PER SCENARIO")
+        report_lines.append("-" * 80)
+        
+        for scenario in scenarios:
+            unique_files = scenario['input_file_names'] - shared_files
+            other_files = set()
+            for other in scenarios:
+                if other['id'] != scenario['id']:
+                    other_files.update(other['input_file_names'])
+            
+            truly_unique = scenario['input_file_names'] - other_files
+            
+            report_lines.append(f"\n{scenario['scenario_name']}:")
+            report_lines.append(f"  Files NOT in common set: {len(unique_files)}")
+            report_lines.append(f"  Files ONLY in this scenario: {len(truly_unique)}")
+            
+            if truly_unique:
+                report_lines.append("  Unique files:")
+                for file in sorted(truly_unique):
+                    report_lines.append(f"    - {file}")
+        
+        # Section 3: File-by-File Matrix
+        report_lines.append("\n" + "-" * 80)
+        report_lines.append("FILE PRESENCE MATRIX")
+        report_lines.append("-" * 80)
+        report_lines.append("\nLegend: ✓ = Present, ✗ = Absent\n")
+        
+        # Create header
+        header = "File Name".ljust(50)
+        for i, scenario in enumerate(scenarios, 1):
+            header += f"  S{i}"
+        report_lines.append(header)
+        report_lines.append("-" * len(header))
+        
+        # Add each file
+        for file in sorted(all_files):
+            line = file[:48].ljust(50)
+            for scenario in scenarios:
+                if file in scenario['input_file_names']:
+                    line += "  ✓ "
+                else:
+                    line += "  ✗ "
+            report_lines.append(line)
+        
+        # Section 4: Summary Statistics
+        report_lines.append("\n" + "-" * 80)
+        report_lines.append("SUMMARY STATISTICS")
+        report_lines.append("-" * 80)
+        
+        for i, scenario in enumerate(scenarios, 1):
+            overlap_counts = []
+            for j, other in enumerate(scenarios, 1):
+                if i != j:
+                    overlap = len(scenario['input_file_names'] & other['input_file_names'])
+                    total = len(scenario['input_file_names'] | other['input_file_names'])
+                    if total > 0:
+                        percentage = (overlap / total) * 100
+                        overlap_counts.append(f"S{j}: {percentage:.1f}%")
+            
+            report_lines.append(f"\nS{i} ({scenario['scenario_name']}) overlap with others:")
+            report_lines.append(f"  {', '.join(overlap_counts)}")
+        
+        report_lines.append("\n" + "=" * 80)
+        report_lines.append("END OF REPORT")
+        report_lines.append("=" * 80)
+        
+        # Generate downloadable file
+        report_content = "\n".join(report_lines)
+        
+        return Response(
+            report_content,
+            mimetype='text/plain',
+            headers={'Content-Disposition': f'attachment;filename=scenario_comparison_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'}
+        )
+        
+    except Exception as e:
+        flash(f'Error comparing scenarios: {str(e)}', 'error')
+        return redirect(url_for('index'))
+
 @app.route('/delete_scenario/<scenario_id>', methods=['POST'])
 def delete_scenario(scenario_id):
     """Delete a scenario and its junction records"""
