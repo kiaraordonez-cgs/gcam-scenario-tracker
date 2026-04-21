@@ -288,40 +288,7 @@ document.getElementById('project-filter').addEventListener('change', function() 
     });
 });
 
-// Compare functionality
-const modal = document.getElementById('compare-modal');
-const closeBtn = document.getElementsByClassName('close')[0];
-
-function showCompareModal() {
-    const checked = document.querySelectorAll('.compare-checkbox:checked');
-    if (checked.length !== 2) {
-        alert('Please select exactly 2 files to compare');
-        return;
-    }
-    modal.style.display = 'block';
-}
-
-function executeCompare() {
-    const checked = document.querySelectorAll('.compare-checkbox:checked');
-    if (checked.length !== 2) {
-        alert('Please select exactly 2 files to compare');
-        return;
-    }
-    
-    const id1 = checked[0].value;
-    const id2 = checked[1].value;
-    window.location.href = `/compare/${id1}/${id2}`;
-}
-
-closeBtn.onclick = function() {
-    modal.style.display = 'none';
-}
-
-window.onclick = function(event) {
-    if (event.target == modal) {
-        modal.style.display = 'none';
-    }
-}
+// Compare functionality and tab switching are now in script.js
 
 // Select all checkboxes
 document.getElementById('select-all').addEventListener('change', function() {

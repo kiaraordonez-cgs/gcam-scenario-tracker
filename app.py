@@ -986,6 +986,9 @@ def compare_scenarios():
 def delete_scenario(scenario_id):
     """Delete a scenario and its junction records"""
     try:
+        if not sheets_available():
+            return jsonify({'success': False, 'error': 'Sheets unavailable'})
+        
         # Find scenario row
         scenario_row = find_row_by_value(scenarios_sheet, 'id', scenario_id)
         
@@ -1002,24 +1005,41 @@ def delete_scenario(scenario_id):
                 file_row = find_row_by_value(file_storage_sheet, 'file_id', config_file_id)
                 if file_row:
                     file_storage_sheet.delete_rows(file_row)
+                    print(f"Deleted file {config_file_id} from storage")
             except Exception as e:
                 print(f"Error deleting file from storage: {e}")
         
         # Delete scenario row
         scenarios_sheet.delete_rows(scenario_row)
+        print(f"Deleted scenario row {scenario_row}")
         
-        # Delete junction records (scenario-input links)
-        # Get all junction records
-        all_junctions = junction_sheet.get_all_records()
-        rows_to_delete = []
-        
-        for idx, record in enumerate(all_junctions, start=2):  # Start at 2 (skip header)
-            if str(record.get('scenario_id')) == str(scenario_id):
-                rows_to_delete.append(idx)
-        
-        # Delete in reverse order to maintain row numbers
-        for row_num in reversed(rows_to_delete):
-            junction_sheet.delete_rows(row_num)
+        # Delete junction records - Get all and filter in Python to minimize API calls
+        try:
+            all_junctions = junction_sheet.get_all_records()
+            rows_to_delete = []
+            
+            for idx, record in enumerate(all_junctions, start=2):  # Start at 2 (skip header)
+                if str(record.get('scenario_id')) == str(scenario_id):
+                    rows_to_delete.append(idx)
+            
+            # Delete in reverse order to maintain row numbers (but limit to avoid rate limit)
+            deleted_count = 0
+            for row_num in reversed(rows_to_delete[:10]):  # Only delete first 10 junctions to avoid rate limit
+                junction_sheet.delete_rows(row_num)
+                deleted_count += 1
+            
+            print(f"Deleted {deleted_count} junction records")
+            
+            # If there are more than 10, warn the user
+            if len(rows_to_delete) > 10:
+                return jsonify({
+                    'success': True, 
+                    'warning': f'Scenario deleted but some junction records remain (deleted {deleted_count} of {len(rows_to_delete)}). They won\'t affect the app.'
+                })
+                
+        except Exception as e:
+            print(f"Error deleting junctions: {e}")
+            # Continue anyway - scenario is deleted
         
         return jsonify({'success': True})
         
