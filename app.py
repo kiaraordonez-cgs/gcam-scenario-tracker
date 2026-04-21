@@ -103,15 +103,23 @@ try:
         file_storage_sheet = sheet.add_worksheet(title='FileStorage', rows=1000, cols=3)
         file_storage_sheet.append_row(['file_id', 'filename', 'content'])
     
-    drive = None  # Not using Drive anymore
+    print("✓ Google Sheets connection successful")
 except Exception as e:
-    print(f"Error initializing Google APIs: {e}")
+    print(f"✗ Error initializing Google APIs: {e}")
+    print("⚠ App will start but Google Sheets features will be unavailable")
     gc = None
-    drive = None
+    scenarios_sheet = None
+    inputs_sheet = None
+    junction_sheet = None
+    file_storage_sheet = None
 
 # =============================================================================
 # Helper Functions - Google Sheets
 # =============================================================================
+
+def sheets_available():
+    """Check if Google Sheets connection is available"""
+    return scenarios_sheet is not None
 
 def get_next_id(worksheet):
     """Get next available ID for a sheet"""
@@ -304,9 +312,15 @@ def parse_configuration_xml(xml_content):
         
         if file_path:
             file_name = Path(file_path).name
+            # Extract folder location (e.g., "../input/gcamdata/xml/file.xml" → "gcamdata/xml")
+            folder_parts = Path(file_path).parent.parts
+            # Remove common prefixes like "..", "input"
+            folder_location = '/'.join([p for p in folder_parts if p not in ('..', '.', 'input')])
+            
             result['input_files'].append({
                 'file_name': file_name,
                 'file_path': file_path,
+                'folder_location': folder_location,
                 'component_key': component_key
             })
     
@@ -365,9 +379,25 @@ def allowed_file(filename):
 # Routes
 # =============================================================================
 
+@app.route('/health')
+def health():
+    """Health check endpoint for Render"""
+    status = {
+        'status': 'ok',
+        'sheets_connected': sheets_available()
+    }
+    return jsonify(status)
+
 @app.route('/')
 def index():
     """Main dashboard"""
+    if not sheets_available():
+        flash('Google Sheets connection unavailable. Please try again in a moment.', 'warning')
+        return render_template('index.html',
+                             scenarios=[],
+                             input_files=[],
+                             projects=[])
+    
     scenarios = get_all_scenarios()
     input_files = get_all_input_files()
     
@@ -461,7 +491,7 @@ def upload_config():
                     'Not analyzed',
                     'Not analyzed',
                     '',  # policy_name
-                    '',  # folder_location
+                    input_file.get('folder_location', ''),  # folder_location from config
                     '',  # description
                     '',  # additional_notes
                     'Auto-detected',

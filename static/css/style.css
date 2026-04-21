@@ -461,3 +461,24 @@ body {
     font-size: 0.95rem;
     color: #111827;
 }
+
+/* Sortable Table Headers */
+.data-table thead th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+}
+
+.data-table thead th.sortable:hover {
+    background: #e5e7eb;
+}
+
+.data-table thead th[data-sort="asc"]::after {
+    content: " ▲";
+    color: #dc2626;
+}
+
+.data-table thead th[data-sort="desc"]::after {
+    content: " ▼";
+    color: #dc2626;
+}
