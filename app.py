@@ -756,7 +756,6 @@ def migrate_folder_locations():
     try:
         # Get all scenarios with their config files
         scenarios = scenarios_sheet.get_all_records()
-        junction_records = junction_sheet.get_all_records()
         input_records = inputs_sheet.get_all_records()
         
         # Build a complete map of filename -> folder_location from all configs
@@ -773,35 +772,36 @@ def migrate_folder_locations():
                 continue
             
             # Parse it
-            parsed = parse_configuration_xml(config_content)
-            
-            # Add to map (later configs will override if same filename)
-            for input_file in parsed['input_files']:
-                file_folder_map[input_file['file_name']] = input_file.get('folder_location', '')
+            try:
+                parsed = parse_configuration_xml(config_content)
+                
+                # Add to map (later configs will override if same filename)
+                for input_file in parsed['input_files']:
+                    file_folder_map[input_file['file_name']] = input_file.get('folder_location', '')
+            except Exception as e:
+                print(f"Error parsing config for scenario {scenario.get('id')}: {e}")
+                continue
         
-        # Now batch update all input files
-        updates = []
+        # Now update all input files using individual updates (slower but safer)
+        updated_count = 0
+        
         for i, input_rec in enumerate(input_records, start=2):  # Start at row 2 (after header)
             file_name = input_rec['file_name']
             if file_name in file_folder_map:
                 folder_loc = file_folder_map[file_name]
-                # Prepare batch update (row, col 7, value)
-                updates.append({
-                    'range': f'InputFiles!G{i}',  # Column G = folder_location
-                    'values': [[folder_loc]]
-                })
-        
-        # Batch update (max 60 per call to avoid rate limit)
-        updated_count = 0
-        batch_size = 50
-        
-        for i in range(0, len(updates), batch_size):
-            batch = updates[i:i+batch_size]
-            
-            # Use batch_update instead of individual updates
-            inputs_sheet.batch_update(batch)
-            updated_count += len(batch)
-            print(f"Updated batch {i//batch_size + 1}, total: {updated_count}")
+                # Update column 7 (folder_location)
+                try:
+                    inputs_sheet.update_cell(i, 7, folder_loc)
+                    updated_count += 1
+                    
+                    # Add small delay every 50 updates to avoid rate limits
+                    if updated_count % 50 == 0:
+                        print(f"Updated {updated_count} files, pausing briefly...")
+                        import time
+                        time.sleep(2)  # 2 second pause
+                except Exception as e:
+                    print(f"Error updating row {i}: {e}")
+                    continue
         
         return jsonify({
             'status': 'success',
@@ -809,23 +809,31 @@ def migrate_folder_locations():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Migration error: {error_details}")
+        return jsonify({'error': str(e), 'details': error_details}), 500
 
 @app.route('/test_compare')
 def test_compare():
     """Test endpoint to verify routing works"""
     return jsonify({'status': 'ok', 'message': 'Comparison routing is working!'})
 
-@app.route('/compare_scenarios')
+@app.route('/compare_scenarios', strict_slashes=False)
 def compare_scenarios():
     """Compare multiple scenarios and generate a report"""
     try:
         print("DEBUG: Compare scenarios route called")
+        print(f"DEBUG: Request args: {request.args}")
         scenario_ids = request.args.get('ids', '').split(',')
         print(f"DEBUG: Scenario IDs: {scenario_ids}")
         
         if len(scenario_ids) < 2:
             flash('Please select at least 2 scenarios to compare', 'error')
+            return redirect(url_for('index'))
+        
+        if not sheets_available():
+            flash('Google Sheets connection unavailable', 'error')
             return redirect(url_for('index'))
         
         # Get all scenarios
