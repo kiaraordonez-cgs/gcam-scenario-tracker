@@ -312,10 +312,21 @@ def parse_configuration_xml(xml_content):
         
         if file_path:
             file_name = Path(file_path).name
-            # Extract folder location (e.g., "../input/gcamdata/xml/file.xml" → "gcamdata/xml")
-            folder_parts = Path(file_path).parent.parts
-            # Remove common prefixes like "..", "input"
-            folder_location = '/'.join([p for p in folder_parts if p not in ('..', '.', 'input')])
+            
+            # Extract folder location - everything between "input/" and the filename
+            # Examples: 
+            #   ../input/gcamdata/xml/file.xml → gcamdata/xml
+            #   ../input/policyAI/file.xml → policyAI
+            #   input/magicc/inputs/file.emk → magicc/inputs
+            folder_location = ''
+            if '/input/' in file_path or file_path.startswith('input/'):
+                # Split by 'input/' and get everything after it
+                parts = file_path.split('/input/', 1)
+                if len(parts) > 1:
+                    # Get the part after 'input/' and remove the filename
+                    after_input = parts[1]
+                    folder_parts = after_input.split('/')[:-1]  # Remove last part (filename)
+                    folder_location = '/'.join(folder_parts)
             
             result['input_files'].append({
                 'file_name': file_name,
@@ -880,7 +891,7 @@ def compare_scenarios():
         
         report_lines.append("")
         
-        # Section 2: Input Files Comparison
+        # Section 2: Input Files Comparison - UNIQUE FILES FIRST
         report_lines.append("-" * 80)
         report_lines.append("INPUT FILES COMPARISON")
         report_lines.append("-" * 80)
@@ -896,12 +907,7 @@ def compare_scenarios():
         report_lines.append(f"\nTotal unique input files across all scenarios: {len(all_files)}")
         report_lines.append(f"Files shared by ALL scenarios: {len(shared_files)}")
         
-        if shared_files:
-            report_lines.append("\nShared Files:")
-            for file in sorted(shared_files):
-                report_lines.append(f"  - {file}")
-        
-        # Files unique to each scenario
+        # UNIQUE FILES FIRST (moved up)
         report_lines.append("\n" + "-" * 80)
         report_lines.append("UNIQUE FILES PER SCENARIO")
         report_lines.append("-" * 80)
@@ -923,6 +929,18 @@ def compare_scenarios():
                 report_lines.append("  Unique files:")
                 for file in sorted(truly_unique):
                     report_lines.append(f"    - {file}")
+        
+        # SHARED FILES AFTER (moved down)
+        report_lines.append("\n" + "-" * 80)
+        report_lines.append("SHARED FILES")
+        report_lines.append("-" * 80)
+        
+        if shared_files:
+            report_lines.append(f"\nFiles present in ALL {len(scenarios)} scenarios ({len(shared_files)} total):")
+            for file in sorted(shared_files):
+                report_lines.append(f"  - {file}")
+        else:
+            report_lines.append("\nNo files are shared by all scenarios.")
         
         # Section 3: File-by-File Matrix
         report_lines.append("\n" + "-" * 80)

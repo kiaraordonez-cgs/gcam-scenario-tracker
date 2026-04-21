@@ -93,7 +93,7 @@
                         <td><span class="badge">{{ scenario.input_count }}</span></td>
                         <td>
                             <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn-small">Download</a>
-                            <button onclick="deleteScenario({{ scenario.id }}, '{{ scenario.scenario_name }}')" class="btn-small btn-danger">🗑️</button>
+                            <button onclick="deleteScenario('{{ scenario.id }}', '{{ scenario.scenario_name }}')" class="btn-small btn-danger">🗑️</button>
                         </td>
                     </tr>
                     {% endfor %}

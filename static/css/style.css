@@ -476,15 +476,39 @@ body {
 .data-table thead th[data-sort="asc"]::after {
     content: " ▴";
     color: #dc2626;
-    font-size: 1.1em;
-    margin-left: 8px;
+    font-size: 2.2em;
+    margin-left: 10px;
     font-weight: bold;
+    vertical-align: middle;
 }
 
 .data-table thead th[data-sort="desc"]::after {
     content: " ▾";
     color: #dc2626;
-    font-size: 1.1em;
-    margin-left: 8px;
+    font-size: 2.2em;
+    margin-left: 10px;
     font-weight: bold;
+    vertical-align: middle;
+}
+
+/* Column Filters */
+.column-filter {
+    width: 100%;
+    padding: 6px;
+    font-size: 0.85rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: white;
+    margin-top: 4px;
+}
+
+.column-filter:focus {
+    outline: none;
+    border-color: #dc2626;
+}
+
+.filter-row th {
+    padding: 8px 16px;
+    background: #f3f4f6;
+    border-bottom: 1px solid #e5e7eb;
 }

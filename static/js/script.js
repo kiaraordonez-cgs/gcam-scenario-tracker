@@ -171,3 +171,71 @@ function deleteScenario(scenarioId, scenarioName) {
         alert('Error deleting scenario: ' + error);
     });
 }
+
+// Column Filtering
+function setupColumnFilters() {
+    // Add filter inputs to table headers
+    document.querySelectorAll('table.data-table thead tr').forEach(headerRow => {
+        // Create a new row for filters
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'filter-row';
+        
+        headerRow.querySelectorAll('th').forEach((th, index) => {
+            const filterCell = document.createElement('th');
+            
+            // Don't add filter to checkbox or actions columns
+            if (th.querySelector('input[type="checkbox"]') || th.textContent.trim() === 'Actions') {
+                filterCell.innerHTML = '';
+            } else {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'column-filter';
+                input.placeholder = 'Filter...';
+                input.dataset.columnIndex = index;
+                
+                input.addEventListener('input', function() {
+                    filterTable(this.closest('table'));
+                });
+                
+                filterCell.appendChild(input);
+            }
+            
+            filterRow.appendChild(filterCell);
+        });
+        
+        // Insert filter row after header row
+        headerRow.parentNode.appendChild(filterRow);
+    });
+}
+
+function filterTable(table) {
+    const filterRow = table.querySelector('.filter-row');
+    const filters = Array.from(filterRow.querySelectorAll('.column-filter'));
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        let showRow = true;
+        
+        filters.forEach((filter, index) => {
+            if (filter.value.trim() === '') return;
+            
+            const cell = row.cells[filter.dataset.columnIndex];
+            if (!cell) return;
+            
+            const cellText = cell.textContent.toLowerCase();
+            const filterText = filter.value.toLowerCase();
+            
+            if (!cellText.includes(filterText)) {
+                showRow = false;
+            }
+        });
+        
+        row.style.display = showRow ? '' : 'none';
+    });
+}
+
+// Initialize filters after DOM loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait a bit for tables to be ready, then add filters
+    setTimeout(setupColumnFilters, 100);
+});
