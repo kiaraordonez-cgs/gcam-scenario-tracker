@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Table Sorting Setup
-    document.querySelectorAll('.sortable th.sortable').forEach((header) => {
+    document.querySelectorAll('th.sortable').forEach((header) => {
         header.style.cursor = 'pointer';
         header.addEventListener('click', function() {
             const table = this.closest('table');
@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const currentSort = this.dataset.sort || 'none';
             const newSort = currentSort === 'asc' ? 'desc' : 'asc';
             
-            // Reset all headers
+            // Reset all headers in this table
             table.querySelectorAll('th.sortable').forEach(th => {
                 delete th.dataset.sort;
                 th.style.fontWeight = 'normal';

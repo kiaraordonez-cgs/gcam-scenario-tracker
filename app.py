@@ -398,8 +398,29 @@ def index():
                              input_files=[],
                              projects=[])
     
-    scenarios = get_all_scenarios()
-    input_files = get_all_input_files()
+    # Optimize: Get junction records once and reuse
+    try:
+        junction_records = junction_sheet.get_all_records()
+    except:
+        junction_records = []
+    
+    # Get scenarios with counts
+    try:
+        scenarios = scenarios_sheet.get_all_records()
+        for record in scenarios:
+            record['input_count'] = sum(1 for j in junction_records if str(j.get('scenario_id')) == str(record.get('id')))
+    except Exception as e:
+        print(f"Error getting scenarios: {e}")
+        scenarios = []
+    
+    # Get input files with counts
+    try:
+        input_files = inputs_sheet.get_all_records()
+        for record in input_files:
+            record['scenario_count'] = sum(1 for j in junction_records if str(j.get('input_file_id')) == str(record.get('id')))
+    except Exception as e:
+        print(f"Error getting input files: {e}")
+        input_files = []
     
     # Get unique projects for dropdown
     projects = list(set([s.get('project_name', '') for s in scenarios if s.get('project_name')]))
@@ -730,7 +751,9 @@ def download_file(file_type, file_id):
 def compare_scenarios():
     """Compare multiple scenarios and generate a report"""
     try:
+        print("DEBUG: Compare scenarios route called")
         scenario_ids = request.args.get('ids', '').split(',')
+        print(f"DEBUG: Scenario IDs: {scenario_ids}")
         
         if len(scenario_ids) < 2:
             flash('Please select at least 2 scenarios to compare', 'error')
@@ -739,12 +762,16 @@ def compare_scenarios():
         # Get all scenarios
         scenarios = []
         for scenario_id in scenario_ids:
+            print(f"DEBUG: Getting scenario {scenario_id}")
             scenario = get_scenario_by_id(scenario_id)
             if scenario:
                 # Get input files for this scenario
                 input_files = get_input_files_for_scenario(scenario_id)
                 scenario['input_file_names'] = set([f['file_name'] for f in input_files])
                 scenarios.append(scenario)
+                print(f"DEBUG: Found scenario with {len(input_files)} input files")
+            else:
+                print(f"DEBUG: Scenario {scenario_id} not found")
         
         if len(scenarios) < 2:
             flash('Could not find all selected scenarios', 'error')

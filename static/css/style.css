@@ -474,11 +474,15 @@ body {
 }
 
 .data-table thead th[data-sort="asc"]::after {
-    content: " ▲";
+    content: " ▴";
     color: #dc2626;
+    font-size: 0.7em;
+    margin-left: 6px;
 }
 
 .data-table thead th[data-sort="desc"]::after {
-    content: " ▼";
+    content: " ▾";
     color: #dc2626;
+    font-size: 0.7em;
+    margin-left: 6px;
 }
