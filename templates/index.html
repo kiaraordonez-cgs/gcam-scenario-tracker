@@ -76,7 +76,7 @@
                         <td><a href="{{ url_for('scenario_detail', scenario_id=scenario.id) }}">{{ scenario.scenario_name }}</a></td>
                         <td class="editable" data-field="personal_scenario_name">{{ scenario.personal_scenario_name or '' }}</td>
                         <td class="editable-dropdown" data-field="project_name">
-                            <select class="inline-edit" onchange="updateScenario({{ scenario.id }}, 'project_name', this.value)">
+                            <select class="inline-edit" onchange="updateScenario('{{ scenario.id }}', 'project_name', this.value)">
                                 <option value="">Select...</option>
                                 {% for project in projects %}
                                 <option value="{{ project }}" {% if scenario.project_name == project %}selected{% endif %}>{{ project }}</option>

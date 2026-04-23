@@ -476,8 +476,8 @@ body {
 .data-table thead th[data-sort="asc"]::after {
     content: " ▴";
     color: #dc2626;
-    font-size: 2.2em;
-    margin-left: 10px;
+    font-size: 1.4em;
+    margin-left: 8px;
     font-weight: bold;
     vertical-align: middle;
 }
@@ -485,8 +485,8 @@ body {
 .data-table thead th[data-sort="desc"]::after {
     content: " ▾";
     color: #dc2626;
-    font-size: 2.2em;
-    margin-left: 10px;
+    font-size: 1.4em;
+    margin-left: 8px;
     font-weight: bold;
     vertical-align: middle;
 }
@@ -494,12 +494,13 @@ body {
 /* Column Filters */
 .column-filter {
     width: 100%;
-    padding: 6px;
+    padding: 6px 8px;
     font-size: 0.85rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
     background: white;
     margin-top: 4px;
+    cursor: pointer;
 }
 
 .column-filter:focus {
@@ -509,6 +510,6 @@ body {
 
 .filter-row th {
     padding: 8px 16px;
-    background: #f3f4f6;
-    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+    border-bottom: 2px solid #e5e7eb;
 }

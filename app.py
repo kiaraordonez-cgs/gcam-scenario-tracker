@@ -317,16 +317,21 @@ def parse_configuration_xml(xml_content):
             # Examples: 
             #   ../input/gcamdata/xml/file.xml → gcamdata/xml
             #   ../input/policyAI/file.xml → policyAI
+            #   input/policyAI/file.xml → policyAI
             #   input/magicc/inputs/file.emk → magicc/inputs
             folder_location = ''
-            if '/input/' in file_path or file_path.startswith('input/'):
-                # Split by 'input/' and get everything after it
+            if '/input/' in file_path:
+                # Handle paths like ../input/xxx or /input/xxx
                 parts = file_path.split('/input/', 1)
                 if len(parts) > 1:
-                    # Get the part after 'input/' and remove the filename
                     after_input = parts[1]
-                    folder_parts = after_input.split('/')[:-1]  # Remove last part (filename)
+                    folder_parts = after_input.split('/')[:-1]  # Remove filename
                     folder_location = '/'.join(folder_parts)
+            elif file_path.startswith('input/'):
+                # Handle paths starting with input/
+                after_input = file_path[6:]  # Remove 'input/'
+                folder_parts = after_input.split('/')[:-1]  # Remove filename
+                folder_location = '/'.join(folder_parts)
             
             result['input_files'].append({
                 'file_name': file_name,
@@ -987,13 +992,64 @@ def compare_scenarios():
         report_lines.append("END OF REPORT")
         report_lines.append("=" * 80)
         
-        # Generate downloadable file
-        report_content = "\n".join(report_lines)
+        # Generate TXT report
+        txt_content = "\n".join(report_lines)
+        
+        # Generate CSV report
+        csv_lines = []
+        csv_lines.append("File Name,Status,Present In")
+        
+        # Create a comprehensive file presence map
+        file_scenario_map = {}  # file_name -> list of scenario names
+        for scenario in scenarios:
+            for file_name in scenario['input_file_names']:
+                if file_name not in file_scenario_map:
+                    file_scenario_map[file_name] = []
+                file_scenario_map[file_name].append(scenario['scenario_name'])
+        
+        # Sort files alphabetically
+        for file_name in sorted(file_scenario_map.keys()):
+            scenario_names = file_scenario_map[file_name]
+            num_scenarios = len(scenario_names)
+            total_scenarios = len(scenarios)
+            
+            # Determine status
+            if num_scenarios == total_scenarios:
+                status = "Shared by all"
+            elif num_scenarios == 1:
+                status = f"Unique to {scenario_names[0]}"
+            else:
+                status = f"Present in {num_scenarios} of {total_scenarios}"
+            
+            # Present in column (semicolon-separated)
+            present_in = "; ".join(scenario_names)
+            
+            # Escape quotes and commas for CSV
+            file_name_clean = file_name.replace('"', '""')
+            status_clean = status.replace('"', '""')
+            present_in_clean = present_in.replace('"', '""')
+            
+            csv_lines.append(f'"{file_name_clean}","{status_clean}","{present_in_clean}"')
+        
+        csv_content = "\n".join(csv_lines)
+        
+        # Create a ZIP file with both TXT and CSV
+        import io
+        import zipfile
+        
+        zip_buffer = io.BytesIO()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr(f'scenario_comparison_{timestamp}.txt', txt_content)
+            zip_file.writestr(f'scenario_comparison_{timestamp}.csv', csv_content)
+        
+        zip_buffer.seek(0)
         
         return Response(
-            report_content,
-            mimetype='text/plain',
-            headers={'Content-Disposition': f'attachment;filename=scenario_comparison_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'}
+            zip_buffer.getvalue(),
+            mimetype='application/zip',
+            headers={'Content-Disposition': f'attachment;filename=scenario_comparison_{timestamp}.zip'}
         )
         
     except Exception as e:

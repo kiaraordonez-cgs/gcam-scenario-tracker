@@ -239,3 +239,94 @@ document.addEventListener('DOMContentLoaded', function() {
     // Wait a bit for tables to be ready, then add filters
     setTimeout(setupColumnFilters, 100);
 });
+// Column Filtering with Checkboxes
+function setupColumnFilters() {
+    document.querySelectorAll('table.data-table').forEach(table => {
+        const thead = table.querySelector('thead');
+        const tbody = table.querySelector('tbody');
+        const headerRow = thead.querySelector('tr');
+        
+        // Create filter row
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'filter-row';
+        
+        headerRow.querySelectorAll('th').forEach((th, columnIndex) => {
+            const filterCell = document.createElement('th');
+            
+            // Skip checkbox and actions columns
+            if (th.querySelector('input[type="checkbox"]') || th.textContent.trim() === 'Actions') {
+                filterCell.innerHTML = '';
+                filterRow.appendChild(filterCell);
+                return;
+            }
+            
+            // Create dropdown filter
+            const select = document.createElement('select');
+            select.className = 'column-filter';
+            select.dataset.columnIndex = columnIndex;
+            
+            // Get unique values for this column
+            const values = new Set();
+            tbody.querySelectorAll('tr').forEach(row => {
+                const cell = row.cells[columnIndex];
+                if (cell) {
+                    const text = cell.textContent.trim();
+                    if (text && text !== 'N/A') {
+                        values.add(text);
+                    }
+                }
+            });
+            
+            // Add "All" option
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = `All (${values.size})`;
+            select.appendChild(allOption);
+            
+            // Add value options (sorted)
+            Array.from(values).sort().forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value.length > 30 ? value.substring(0, 27) + '...' : value;
+                option.title = value;
+                select.appendChild(option);
+            });
+            
+            // Add change listener
+            select.addEventListener('change', function() {
+                filterTable(table);
+            });
+            
+            filterCell.appendChild(select);
+            filterRow.appendChild(filterCell);
+        });
+        
+        thead.appendChild(filterRow);
+    });
+}
+
+function filterTable(table) {
+    const filterRow = table.querySelector('.filter-row');
+    const filters = Array.from(filterRow.querySelectorAll('.column-filter'));
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        let showRow = true;
+        
+        filters.forEach(filter => {
+            const filterValue = filter.value;
+            if (!filterValue) return; // "All" selected
+            
+            const columnIndex = parseInt(filter.dataset.columnIndex);
+            const cell = row.cells[columnIndex];
+            if (!cell) return;
+            
+            const cellText = cell.textContent.trim();
+            if (cellText !== filterValue) {
+                showRow = false;
+            }
+        });
+        
+        row.style.display = showRow ? '' : 'none';
+    });
+}
