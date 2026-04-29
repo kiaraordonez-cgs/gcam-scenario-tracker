@@ -40,16 +40,13 @@ ALLOWED_EXTENSIONS = {'xml'}
 # =============================================================================
 
 def get_google_sheets_client():
-    """Initialize and return Google Sheets client with retry logic"""
+    """Initialize and return Google Sheets client"""
     import os
     import json
     import base64
     
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            # Try base64 encoded env var first
-            creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
+    # Try base64 encoded env var first
+    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
     if creds_base64:
         print("DEBUG: Using base64 encoded credentials")
         creds_json = base64.b64decode(creds_base64).decode('utf-8')
@@ -91,36 +88,30 @@ def get_google_drive_client():
     return build('drive', 'v3', credentials=creds)
 
 # Initialize clients
-import time as _time
-_max_retries = 3
-for _attempt in range(_max_retries):
+try:
+    gc = get_google_sheets_client()
+    sheet = gc.open_by_key(GOOGLE_SHEET_ID)
+    scenarios_sheet = sheet.worksheet('Scenarios')
+    inputs_sheet = sheet.worksheet('InputFiles')
+    junction_sheet = sheet.worksheet('ScenarioInputs')
+    
+    # FileStorage sheet for storing XML content
     try:
-        gc = get_google_sheets_client()
-        sheet = gc.open_by_key(GOOGLE_SHEET_ID)
-        scenarios_sheet = sheet.worksheet('Scenarios')
-        inputs_sheet = sheet.worksheet('InputFiles')
-        junction_sheet = sheet.worksheet('ScenarioInputs')
-        
-        # FileStorage sheet for storing XML content
-        try:
-            file_storage_sheet = sheet.worksheet('FileStorage')
-        except:
-            file_storage_sheet = sheet.add_worksheet(title='FileStorage', rows=1000, cols=3)
-            file_storage_sheet.append_row(['file_id', 'filename', 'content'])
-        
-        print("✓ Google Sheets connection successful")
-        break
-    except Exception as e:
-        print(f"✗ Attempt {_attempt+1}/{_max_retries} failed: {e}")
-        if _attempt < _max_retries - 1:
-            _time.sleep(2)
-        else:
-            print("⚠ App will start but Google Sheets features will be unavailable")
-            gc = None
-            scenarios_sheet = None
-            inputs_sheet = None
-            junction_sheet = None
-            file_storage_sheet = None
+        file_storage_sheet = sheet.worksheet('FileStorage')
+    except:
+        # Create if doesn't exist
+        file_storage_sheet = sheet.add_worksheet(title='FileStorage', rows=1000, cols=3)
+        file_storage_sheet.append_row(['file_id', 'filename', 'content'])
+    
+    print("✓ Google Sheets connection successful")
+except Exception as e:
+    print(f"✗ Error initializing Google APIs: {e}")
+    print("⚠ App will start but Google Sheets features will be unavailable")
+    gc = None
+    scenarios_sheet = None
+    inputs_sheet = None
+    junction_sheet = None
+    file_storage_sheet = None
 
 # =============================================================================
 # Helper Functions - Google Sheets
@@ -1369,175 +1360,6 @@ def delete_scenario(scenario_id):
         print(f"Error deleting scenario: {e}")
         invalidate_cache()
         return jsonify({'success': False, 'error': str(e)})
-
-# =============================================================================
-# Zaratan API Endpoints
-# =============================================================================
-
-@app.route('/api/submit', methods=['POST'])
-def api_submit():
-    """API endpoint for Zaratan: upload config and record submission time.
-    
-    Called by Zaratan hook script when sbatch is submitted.
-    Expects: multipart form with 'config_file' and optional 'job_id'.
-    Returns JSON with scenario_id for later updates.
-    """
-    if not sheets_available():
-        return jsonify({'error': 'Sheets unavailable'}), 503
-    
-    # Accept either file upload or raw XML content
-    file_content = None
-    filename = None
-    
-    if 'config_file' in request.files:
-        f = request.files['config_file']
-        filename = secure_filename(f.filename)
-        file_content = f.read().decode('utf-8')
-    elif request.is_json and 'config_content' in request.json:
-        file_content = request.json['config_content']
-        filename = request.json.get('filename', 'unknown.xml')
-    else:
-        return jsonify({'error': 'No config file provided'}), 400
-    
-    try:
-        # Store config in sheets
-        file_id = upload_file_to_sheet(file_content, filename)
-        
-        # Parse configuration
-        parsed = parse_configuration_xml(file_content)
-        
-        # Create scenario with Zaratan metadata
-        scenario_id = str(uuid.uuid4())[:8]
-        submitted_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-        job_id = request.form.get('job_id', '') or (request.json.get('job_id', '') if request.is_json else '')
-        
-        scenarios_sheet.append_row([
-            scenario_id,
-            parsed['scenario_name'],
-            '',  # personal_scenario_name
-            '',  # project_name
-            '',  # date_run (removed from UI but keep column for compatibility)
-            '',  # description
-            '',  # zaratan_link
-            '',  # additional_notes
-            'Zaratan',  # uploaded_by
-            datetime.now().isoformat(),  # upload_date
-            file_id,
-            len(parsed['input_files']),
-            '',  # errors
-            submitted_time,  # submitted
-            '',  # finished
-            job_id,  # job_id
-            ''   # duration
-        ])
-        
-        # Process input files (same as manual upload)
-        existing_files = {}
-        try:
-            all_inputs = inputs_sheet.get_all_records()
-            for inp in all_inputs:
-                existing_files[inp['file_name']] = inp['id']
-        except:
-            pass
-        
-        new_files_to_add = []
-        junctions_to_add = []
-        next_input_id = get_next_id(inputs_sheet)
-        
-        for input_file in parsed['input_files']:
-            if input_file['file_name'] in existing_files:
-                input_id = existing_files[input_file['file_name']]
-            else:
-                input_id = next_input_id
-                new_files_to_add.append([
-                    input_id,
-                    input_file['file_name'],
-                    'Not analyzed', 'Not analyzed', 'Not analyzed',
-                    '', input_file.get('folder_location', ''),
-                    '', '', 'Auto-detected',
-                    datetime.now().isoformat(), ''
-                ])
-                existing_files[input_file['file_name']] = input_id
-                next_input_id += 1
-            
-            junctions_to_add.append([
-                scenario_id, input_id, input_file['component_key']
-            ])
-        
-        if new_files_to_add:
-            inputs_sheet.append_rows(new_files_to_add)
-        if junctions_to_add:
-            junction_sheet.append_rows(junctions_to_add)
-        
-        invalidate_cache()
-        
-        return jsonify({
-            'success': True,
-            'scenario_id': scenario_id,
-            'scenario_name': parsed['scenario_name'],
-            'submitted': submitted_time,
-            'input_files_count': len(parsed['input_files'])
-        })
-        
-    except Exception as e:
-        import traceback
-        print(f"API submit error: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/finish', methods=['POST'])
-def api_finish():
-    """API endpoint for Zaratan: record finish time and check for errors.
-    
-    Called by Zaratan hook script after GCAM run completes.
-    Expects JSON: {scenario_id, has_errors (bool), finished (datetime string)}
-    """
-    if not sheets_available():
-        return jsonify({'error': 'Sheets unavailable'}), 503
-    
-    data = request.json
-    if not data or 'scenario_id' not in data:
-        return jsonify({'error': 'scenario_id required'}), 400
-    
-    try:
-        scenario_id = data['scenario_id']
-        row = find_row_by_value(scenarios_sheet, 'id', scenario_id)
-        
-        if not row:
-            return jsonify({'error': 'Scenario not found'}), 404
-        
-        finished_time = data.get('finished', datetime.now().strftime('%Y-%m-%d %H:%M'))
-        has_errors = data.get('has_errors', False)
-        
-        # Update finished time (col 15)
-        scenarios_sheet.update_cell(row, 15, finished_time)
-        
-        # Update errors (col 13)
-        if has_errors:
-            scenarios_sheet.update_cell(row, 13, 'Yes')
-        
-        # Compute and update duration (col 17)
-        try:
-            row_data = scenarios_sheet.row_values(row)
-            submitted = row_data[13] if len(row_data) > 13 else ''  # col 14 = index 13
-            if submitted and finished_time:
-                duration = compute_duration(submitted, finished_time)
-                scenarios_sheet.update_cell(row, 17, duration)
-        except:
-            pass
-        
-        invalidate_cache()
-        
-        return jsonify({
-            'success': True,
-            'scenario_id': scenario_id,
-            'finished': finished_time,
-            'errors': has_errors
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 
 # =============================================================================
 # Main
