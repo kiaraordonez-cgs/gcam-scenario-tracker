@@ -55,7 +55,7 @@ function setupColumnFilters() {
         headerRow.querySelectorAll('th').forEach((th, colIdx) => {
             const filterCell = document.createElement('th');
             
-            // Skip checkbox, actions, badge columns
+            // Skip checkbox and actions columns only
             const text = th.textContent.trim();
             if (th.querySelector('input[type="checkbox"]') || text === 'Actions') {
                 filterCell.innerHTML = '';
@@ -69,25 +69,18 @@ function setupColumnFilters() {
                 const cell = row.cells[colIdx];
                 if (cell) {
                     const val = cell.textContent.trim();
-                    if (val && val !== '' && val !== 'N/A') values.add(val);
+                    if (val && val !== '') values.add(val);
                 }
             });
-            
-            // Only add filter if there are values to filter by
-            if (values.size <= 1) {
-                filterCell.innerHTML = '';
-                filterRow.appendChild(filterCell);
-                return;
-            }
             
             const select = document.createElement('select');
             select.className = 'column-filter';
             select.dataset.columnIndex = colIdx;
             
-            // Default option - clean label
+            // Default option - clean label, no triangle
             const defaultOpt = document.createElement('option');
             defaultOpt.value = '';
-            defaultOpt.textContent = 'Filter ▾';
+            defaultOpt.textContent = 'Filter';
             select.appendChild(defaultOpt);
             
             // Sorted unique values
@@ -139,14 +132,7 @@ function showCompareModal() {
     }
     
     const scenarioIds = Array.from(checked).map(cb => cb.value);
-    const names = Array.from(checked).map(cb => {
-        const row = cb.closest('tr');
-        return row.cells[1].textContent.trim();
-    });
-    
-    if (confirm(`Compare ${checked.length} scenarios?\n\n${names.join('\n')}\n\nThis will download a comparison spreadsheet.`)) {
-        window.location.href = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
-    }
+    window.location.href = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
 }
 
 // =============================================================================

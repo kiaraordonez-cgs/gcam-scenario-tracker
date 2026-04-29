@@ -58,18 +58,16 @@
                         <th class="sortable">Scenario Name</th>
                         <th class="sortable">Other Name</th>
                         <th class="sortable">Project</th>
-                        <th class="sortable">Date Run</th>
+                        <th class="sortable">Submitted</th>
+                        <th class="sortable">Finished</th>
+                        <th class="sortable">Errors</th>
                         <th class="sortable">Description</th>
                         <th class="sortable">Zaratan Link</th>
+                        <th class="sortable">Job ID</th>
                         <th class="sortable">Notes</th>
                         <th class="sortable">Uploaded By</th>
                         <th class="sortable">Upload Date</th>
                         <th class="sortable">Input Files</th>
-                        <th class="sortable">Errors</th>
-                        <th class="sortable">Submitted</th>
-                        <th class="sortable">Finished</th>
-                        <th class="sortable">Job ID</th>
-                        <th class="sortable">Duration</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -88,9 +86,16 @@
                                 <option value="__new__">+ Add New</option>
                             </select>
                         </td>
-                        <td class="editable" data-field="date_run">{{ scenario.date_run or '' }}</td>
+                        <td class="editable" data-field="submitted">{{ scenario.submitted or '' }}</td>
+                        <td class="editable" data-field="finished">{{ scenario.finished or '' }}</td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" class="error-checkbox" 
+                                   {% if scenario.errors %}checked{% endif %}
+                                   onchange="updateScenario('{{ scenario.id }}', 'errors', this.checked ? 'Yes' : '')">
+                        </td>
                         <td class="editable" data-field="description">{{ scenario.description or '' }}</td>
                         <td class="editable" data-field="zaratan_link">{{ scenario.zaratan_link or '' }}</td>
+                        <td class="editable" data-field="job_id">{{ scenario.job_id or '' }}</td>
                         <td class="editable" data-field="additional_notes">{{ scenario.additional_notes or '' }}</td>
                         <td>
                             <select class="inline-edit inline-edit-sm" onchange="updateScenario('{{ scenario.id }}', 'uploaded_by', this.value)">
@@ -100,15 +105,6 @@
                         </td>
                         <td>{{ scenario.upload_date[:10] if scenario.upload_date else '' }}</td>
                         <td><span class="badge">{{ scenario.input_count }}</span></td>
-                        <td style="text-align: center;">
-                            <input type="checkbox" class="error-checkbox" 
-                                   {% if scenario.errors %}checked{% endif %}
-                                   onchange="updateScenario('{{ scenario.id }}', 'errors', this.checked ? 'Yes' : '')">
-                        </td>
-                        <td class="editable" data-field="submitted">{{ scenario.submitted or '' }}</td>
-                        <td class="editable" data-field="finished">{{ scenario.finished or '' }}</td>
-                        <td class="editable" data-field="job_id">{{ scenario.job_id or '' }}</td>
-                        <td>{{ scenario.duration or '' }}</td>
                         <td>
                             <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn-small">Download</a>
                             <button onclick="deleteScenario('{{ scenario.id }}', '{{ scenario.scenario_name }}')" class="btn-small btn-danger">🗑️</button>

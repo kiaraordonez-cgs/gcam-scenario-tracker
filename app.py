@@ -914,6 +914,44 @@ def test_compare():
     """Test endpoint to verify routing works"""
     return jsonify({'status': 'ok', 'message': 'Comparison routing is working!'})
 
+@app.route('/cleanup_orphaned_junctions')
+def cleanup_orphaned_junctions():
+    """Remove junction records that reference deleted scenarios"""
+    if not sheets_available():
+        return jsonify({'error': 'Sheets not available'}), 503
+    try:
+        import time
+        scenarios = scenarios_sheet.get_all_records()
+        valid_scenario_ids = set(str(s['id']) for s in scenarios)
+        
+        all_junctions = junction_sheet.get_all_records()
+        orphaned_rows = []
+        
+        for idx, j in enumerate(all_junctions, start=2):
+            if str(j.get('scenario_id', '')) not in valid_scenario_ids:
+                orphaned_rows.append(idx)
+        
+        deleted = 0
+        for row_num in reversed(orphaned_rows):
+            try:
+                junction_sheet.delete_rows(row_num)
+                deleted += 1
+                if deleted % 40 == 0:
+                    time.sleep(62)
+            except Exception as e:
+                if '429' in str(e):
+                    time.sleep(65)
+                    try:
+                        junction_sheet.delete_rows(row_num)
+                        deleted += 1
+                    except:
+                        pass
+        
+        invalidate_cache()
+        return jsonify({'status': 'success', 'orphaned_found': len(orphaned_rows), 'deleted': deleted})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/add_zaratan_columns')
 def add_zaratan_columns():
     """One-time migration to add new Zaratan columns to Scenarios sheet"""
@@ -1119,18 +1157,12 @@ def compare_scenarios():
                     file_scenario_map[file_name] = set()
                 file_scenario_map[file_name].add(scenario['scenario_name'])
         
-        # Sort files A-Z
         all_files_sorted = sorted(file_scenario_map.keys())
+        total_scenarios = len(scenarios)
         
-        # --- Sheet 1: Presence Matrix (like R script output) ---
-        ws1 = wb.active
-        ws1.title = "Presence Matrix"
-        
-        # Styles
+        # Styles - only for headers
         header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill = PatternFill("solid", fgColor="991B1B")  # Dark red
-        present_fill = PatternFill("solid", fgColor="D1FAE5")  # Light green
-        absent_fill = PatternFill("solid", fgColor="FEE2E2")   # Light red
+        header_fill = PatternFill("solid", fgColor="991B1B")
         border = Border(
             left=Side(style='thin', color='D1D5DB'),
             right=Side(style='thin', color='D1D5DB'),
@@ -1139,74 +1171,19 @@ def compare_scenarios():
         )
         center_align = Alignment(horizontal='center', vertical='center')
         
-        # Headers
-        headers = ["File Name", "Folder"] + scenario_names_list
-        for col, header in enumerate(headers, 1):
+        # --- Sheet 1: Summary (first tab) ---
+        ws1 = wb.active
+        ws1.title = "Summary"
+        
+        summary_headers = ["File Name", "Folder", "Status", "Present In"]
+        for col, header in enumerate(summary_headers, 1):
             cell = ws1.cell(row=1, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = center_align
             cell.border = border
         
-        # Data rows
-        for row_idx, file_name in enumerate(all_files_sorted, 2):
-            folder = file_folder_map.get(file_name, '')
-            present_in = file_scenario_map.get(file_name, set())
-            
-            # File name
-            cell = ws1.cell(row=row_idx, column=1, value=file_name)
-            cell.border = border
-            
-            # Folder
-            cell = ws1.cell(row=row_idx, column=2, value=folder)
-            cell.border = border
-            
-            # Scenario presence (1/0 with conditional formatting)
-            for sc_idx, sc_name in enumerate(scenario_names_list, 3):
-                is_present = sc_name in present_in
-                cell = ws1.cell(row=row_idx, column=sc_idx, value=1 if is_present else 0)
-                cell.alignment = center_align
-                cell.border = border
-                cell.fill = present_fill if is_present else absent_fill
-                cell.font = Font(bold=True, color="065F46" if is_present else "991B1B")
-        
-        # Summary row at bottom
-        summary_row = len(all_files_sorted) + 3
-        ws1.cell(row=summary_row, column=1, value="TOTAL FILES").font = Font(bold=True)
-        for sc_idx, sc_name in enumerate(scenario_names_list, 3):
-            count = sum(1 for f in all_files_sorted if sc_name in file_scenario_map.get(f, set()))
-            cell = ws1.cell(row=summary_row, column=sc_idx, value=count)
-            cell.font = Font(bold=True)
-            cell.alignment = center_align
-        
-        # Column widths
-        ws1.column_dimensions['A'].width = 40
-        ws1.column_dimensions['B'].width = 20
-        for i in range(3, 3 + len(scenario_names_list)):
-            from openpyxl.utils import get_column_letter
-            ws1.column_dimensions[get_column_letter(i)].width = max(15, len(scenario_names_list[i-3]) + 4)
-        
-        # Freeze top row
-        ws1.freeze_panes = 'A2'
-        
-        # --- Sheet 2: Summary (unique/shared with status) ---
-        ws2 = wb.create_sheet("Summary")
-        
-        # Headers
-        summary_headers = ["File Name", "Folder", "Status", "Present In"]
-        for col, header in enumerate(summary_headers, 1):
-            cell = ws2.cell(row=1, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = border
-        
-        # Unique files first, then shared
-        unique_fill = PatternFill("solid", fgColor="FEF3C7")  # Light yellow
-        shared_fill = PatternFill("solid", fgColor="DBEAFE")   # Light blue
-        
         current_row = 2
-        total_scenarios = len(scenarios)
         
         # Unique files first
         for file_name in all_files_sorted:
@@ -1216,22 +1193,20 @@ def compare_scenarios():
                 
                 if len(present_in) == 1:
                     status = f"Unique to {list(present_in)[0]}"
+                    present_str = ''  # Leave empty for unique files
                 else:
                     status = f"In {len(present_in)} of {total_scenarios} scenarios"
+                    present_str = "; ".join(sorted(present_in))
                 
-                present_str = "; ".join(sorted(present_in))
-                
-                ws2.cell(row=current_row, column=1, value=file_name).border = border
-                ws2.cell(row=current_row, column=2, value=folder).border = border
-                cell = ws2.cell(row=current_row, column=3, value=status)
-                cell.border = border
-                cell.fill = unique_fill
-                ws2.cell(row=current_row, column=4, value=present_str).border = border
+                ws1.cell(row=current_row, column=1, value=file_name).border = border
+                ws1.cell(row=current_row, column=2, value=folder).border = border
+                ws1.cell(row=current_row, column=3, value=status).border = border
+                ws1.cell(row=current_row, column=4, value=present_str).border = border
                 current_row += 1
         
         # Separator row
-        sep_cell = ws2.cell(row=current_row, column=1, value=f"--- SHARED FILES ({len(shared_files)} files in all {total_scenarios} scenarios) ---")
-        sep_cell.font = Font(bold=True, color="1E40AF")
+        sep_cell = ws1.cell(row=current_row, column=1, value=f"--- SHARED FILES ({len(shared_files)} files in all {total_scenarios} scenarios) ---")
+        sep_cell.font = Font(bold=True)
         current_row += 1
         
         # Shared files
@@ -1239,22 +1214,60 @@ def compare_scenarios():
             folder = file_folder_map.get(file_name, '')
             present_str = "; ".join(scenario_names_list)
             
-            ws2.cell(row=current_row, column=1, value=file_name).border = border
-            ws2.cell(row=current_row, column=2, value=folder).border = border
-            cell = ws2.cell(row=current_row, column=3, value="Shared by all")
-            cell.border = border
-            cell.fill = shared_fill
-            ws2.cell(row=current_row, column=4, value=present_str).border = border
+            ws1.cell(row=current_row, column=1, value=file_name).border = border
+            ws1.cell(row=current_row, column=2, value=folder).border = border
+            ws1.cell(row=current_row, column=3, value="Shared by all").border = border
+            ws1.cell(row=current_row, column=4, value=present_str).border = border
             current_row += 1
         
-        # Column widths
+        ws1.column_dimensions['A'].width = 40
+        ws1.column_dimensions['B'].width = 20
+        ws1.column_dimensions['C'].width = 30
+        ws1.column_dimensions['D'].width = 50
+        ws1.freeze_panes = 'A2'
+        
+        # --- Sheet 2: Presence Matrix ---
+        ws2 = wb.create_sheet("Presence Matrix")
+        
+        headers = ["File Name", "Folder"] + scenario_names_list
+        for col, header in enumerate(headers, 1):
+            cell = ws2.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = border
+        
+        # Data rows - no fill colors, just 1/0
+        for row_idx, file_name in enumerate(all_files_sorted, 2):
+            folder = file_folder_map.get(file_name, '')
+            present_in = file_scenario_map.get(file_name, set())
+            
+            ws2.cell(row=row_idx, column=1, value=file_name).border = border
+            ws2.cell(row=row_idx, column=2, value=folder).border = border
+            
+            for sc_idx, sc_name in enumerate(scenario_names_list, 3):
+                is_present = sc_name in present_in
+                cell = ws2.cell(row=row_idx, column=sc_idx, value=1 if is_present else 0)
+                cell.alignment = center_align
+                cell.border = border
+        
+        # Summary row
+        summary_row = len(all_files_sorted) + 3
+        ws2.cell(row=summary_row, column=1, value="TOTAL FILES").font = Font(bold=True)
+        for sc_idx, sc_name in enumerate(scenario_names_list, 3):
+            count = sum(1 for f in all_files_sorted if sc_name in file_scenario_map.get(f, set()))
+            cell = ws2.cell(row=summary_row, column=sc_idx, value=count)
+            cell.font = Font(bold=True)
+            cell.alignment = center_align
+        
         ws2.column_dimensions['A'].width = 40
         ws2.column_dimensions['B'].width = 20
-        ws2.column_dimensions['C'].width = 30
-        ws2.column_dimensions['D'].width = 50
+        from openpyxl.utils import get_column_letter
+        for i in range(3, 3 + len(scenario_names_list)):
+            ws2.column_dimensions[get_column_letter(i)].width = max(15, len(scenario_names_list[i-3]) + 4)
         ws2.freeze_panes = 'A2'
         
-        # Save to buffer
+        # Save
         xlsx_buffer = io.BytesIO()
         wb.save(xlsx_buffer)
         xlsx_buffer.seek(0)
@@ -1275,7 +1288,7 @@ def compare_scenarios():
 
 @app.route('/delete_scenario/<scenario_id>', methods=['POST'])
 def delete_scenario(scenario_id):
-    """Delete a scenario and its junction records"""
+    """Delete a scenario and ALL its junction records"""
     try:
         if not sheets_available():
             return jsonify({'success': False, 'error': 'Sheets unavailable'})
@@ -1304,34 +1317,43 @@ def delete_scenario(scenario_id):
         scenarios_sheet.delete_rows(scenario_row)
         print(f"Deleted scenario row {scenario_row}")
         
-        # Delete junction records - Get all and filter in Python to minimize API calls
+        # Delete ALL junction records for this scenario
+        import time
         try:
             all_junctions = junction_sheet.get_all_records()
             rows_to_delete = []
             
-            for idx, record in enumerate(all_junctions, start=2):  # Start at 2 (skip header)
+            for idx, record in enumerate(all_junctions, start=2):
                 if str(record.get('scenario_id')) == str(scenario_id):
                     rows_to_delete.append(idx)
             
-            # Delete in reverse order to maintain row numbers (but limit to avoid rate limit)
+            # Delete ALL in reverse order, with rate limit pauses
             deleted_count = 0
-            for row_num in reversed(rows_to_delete[:10]):  # Only delete first 10 junctions to avoid rate limit
-                junction_sheet.delete_rows(row_num)
-                deleted_count += 1
+            for row_num in reversed(rows_to_delete):
+                try:
+                    junction_sheet.delete_rows(row_num)
+                    deleted_count += 1
+                    if deleted_count % 40 == 0:
+                        print(f"Deleted {deleted_count}/{len(rows_to_delete)} junctions, pausing...")
+                        time.sleep(62)
+                except Exception as e:
+                    if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+                        print(f"Rate limited at {deleted_count}, pausing 65s...")
+                        time.sleep(65)
+                        try:
+                            junction_sheet.delete_rows(row_num)
+                            deleted_count += 1
+                        except:
+                            pass
+                    else:
+                        print(f"Error deleting junction row {row_num}: {e}")
             
-            print(f"Deleted {deleted_count} junction records")
-            
-            # If there are more than 10, warn the user
-            if len(rows_to_delete) > 10:
-                return jsonify({
-                    'success': True, 
-                    'warning': f'Scenario deleted but some junction records remain (deleted {deleted_count} of {len(rows_to_delete)}). They won\'t affect the app.'
-                })
+            print(f"Deleted {deleted_count}/{len(rows_to_delete)} junction records")
                 
         except Exception as e:
             print(f"Error deleting junctions: {e}")
-            # Continue anyway - scenario is deleted
         
+        invalidate_cache()
         return jsonify({'success': True})
         
     except Exception as e:
