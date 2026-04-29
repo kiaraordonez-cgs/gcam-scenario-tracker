@@ -494,22 +494,47 @@ body {
 /* Column Filters */
 .column-filter {
     width: 100%;
-    padding: 6px 8px;
-    font-size: 0.85rem;
+    padding: 5px 6px;
+    font-size: 0.8rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
     background: white;
-    margin-top: 4px;
     cursor: pointer;
+    color: #6b7280;
 }
 
 .column-filter:focus {
     outline: none;
     border-color: #dc2626;
+    color: #111;
+}
+
+/* When a filter value is selected, make it darker */
+.column-filter.active-filter {
+    color: #111;
+    border-color: #dc2626;
+    font-weight: 500;
 }
 
 .filter-row th {
-    padding: 8px 16px;
+    padding: 4px 8px;
     background: #f9fafb;
     border-bottom: 2px solid #e5e7eb;
+}
+
+/* Uploaded By dropdown */
+.inline-edit-sm {
+    padding: 2px 4px;
+    font-size: 0.8rem;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    background: white;
+}
+
+/* Error checkbox */
+.error-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #dc2626;
 }

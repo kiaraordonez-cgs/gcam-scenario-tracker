@@ -121,6 +121,54 @@ def sheets_available():
     """Check if Google Sheets connection is available"""
     return scenarios_sheet is not None
 
+# Simple in-memory cache to speed up page loads
+_cache = {'data': None, 'timestamp': 0}
+CACHE_TTL = 30  # seconds
+
+def get_cached_data():
+    """Get all sheet data with caching to reduce API calls"""
+    import time
+    now = time.time()
+    if _cache['data'] and (now - _cache['timestamp']) < CACHE_TTL:
+        return _cache['data']
+    
+    try:
+        scenarios = scenarios_sheet.get_all_records()
+        junctions = junction_sheet.get_all_records()
+        inputs = inputs_sheet.get_all_records()
+        _cache['data'] = {'scenarios': scenarios, 'junctions': junctions, 'inputs': inputs}
+        _cache['timestamp'] = now
+        return _cache['data']
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+def invalidate_cache():
+    """Clear cache after writes"""
+    _cache['data'] = None
+    _cache['timestamp'] = 0
+
+def compute_duration(submitted_str, finished_str):
+    """Compute duration between two datetime strings"""
+    try:
+        # Try various formats
+        for fmt in ['%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M', '%m/%d/%Y %H:%M', '%Y-%m-%d %H:%M:%S']:
+            try:
+                t1 = datetime.strptime(submitted_str.strip(), fmt)
+                t2 = datetime.strptime(finished_str.strip(), fmt)
+                diff = t2 - t1
+                total_minutes = int(diff.total_seconds() / 60)
+                hours = total_minutes // 60
+                minutes = total_minutes % 60
+                if hours > 0:
+                    return f"{hours}h {minutes}m"
+                return f"{minutes}m"
+            except ValueError:
+                continue
+        return ''
+    except:
+        return ''
+
 def get_next_id(worksheet):
     """Get next available ID for a sheet"""
     values = worksheet.col_values(1)[1:]  # Skip header
@@ -414,33 +462,32 @@ def index():
                              input_files=[],
                              projects=[])
     
-    # Optimize: Get junction records once and reuse
-    try:
-        junction_records = junction_sheet.get_all_records()
-    except:
-        junction_records = []
+    # Use cached data to reduce API calls (3 calls -> 0 on cache hit)
+    cached = get_cached_data()
+    if not cached:
+        flash('Error loading data. Please refresh.', 'warning')
+        return render_template('index.html', scenarios=[], input_files=[], projects=[])
     
-    # Get scenarios with counts
-    try:
-        scenarios = scenarios_sheet.get_all_records()
-        for record in scenarios:
-            record['input_count'] = sum(1 for j in junction_records if str(j.get('scenario_id')) == str(record.get('id')))
-    except Exception as e:
-        print(f"Error getting scenarios: {e}")
-        scenarios = []
+    scenarios = cached['scenarios']
+    junction_records = cached['junctions']
+    input_files = cached['inputs']
     
-    # Get input files with counts
-    try:
-        input_files = inputs_sheet.get_all_records()
-        for record in input_files:
-            record['scenario_count'] = sum(1 for j in junction_records if str(j.get('input_file_id')) == str(record.get('id')))
-    except Exception as e:
-        print(f"Error getting input files: {e}")
-        input_files = []
+    # Compute counts and durations
+    for record in scenarios:
+        record['input_count'] = sum(1 for j in junction_records if str(j.get('scenario_id')) == str(record.get('id')))
+        # Compute duration if submitted and finished exist
+        submitted = str(record.get('submitted', ''))
+        finished = str(record.get('finished', ''))
+        if submitted and finished:
+            record['duration'] = compute_duration(submitted, finished)
+        else:
+            record['duration'] = ''
+    
+    for record in input_files:
+        record['scenario_count'] = sum(1 for j in junction_records if str(j.get('input_file_id')) == str(record.get('id')))
     
     # Get unique projects for dropdown
-    projects = list(set([s.get('project_name', '') for s in scenarios if s.get('project_name')]))
-    projects.sort()
+    projects = sorted(set([s.get('project_name', '') for s in scenarios if s.get('project_name')]))
     
     return render_template('index.html',
                          scenarios=scenarios,
@@ -496,7 +543,12 @@ def upload_config():
             uploaded_by,
             upload_date,
             file_id,
-            len(parsed['input_files'])
+            len(parsed['input_files']),
+            '',  # errors (col 13)
+            '',  # submitted (col 14)
+            '',  # finished (col 15)
+            '',  # job_id (col 16)
+            ''   # duration (col 17)
         ])
         
         # Process input files in batch to avoid rate limits
@@ -554,6 +606,7 @@ def upload_config():
             junction_sheet.append_rows(junctions_to_add)
         
         flash(f'Successfully uploaded scenario "{parsed["scenario_name"]}" with {len(parsed["input_files"])} input files', 'success')
+        invalidate_cache()
         
     except Exception as e:
         flash(f'Error processing file: {str(e)}', 'error')
@@ -649,7 +702,33 @@ def update_scenario(scenario_id):
             scenarios_sheet.update_cell(row, 8, data['additional_notes'])
         if 'uploaded_by' in data:
             scenarios_sheet.update_cell(row, 9, data['uploaded_by'])
+        # New Zaratan columns (13-17)
+        if 'errors' in data:
+            scenarios_sheet.update_cell(row, 13, data['errors'])
+        if 'submitted' in data:
+            scenarios_sheet.update_cell(row, 14, data['submitted'])
+            # Recompute duration if both submitted and finished exist
+            try:
+                row_data = scenarios_sheet.row_values(row)
+                finished = row_data[14] if len(row_data) > 14 else ''
+                if data['submitted'] and finished:
+                    duration = compute_duration(data['submitted'], finished)
+                    scenarios_sheet.update_cell(row, 17, duration)
+            except: pass
+        if 'finished' in data:
+            scenarios_sheet.update_cell(row, 15, data['finished'])
+            # Recompute duration
+            try:
+                row_data = scenarios_sheet.row_values(row)
+                submitted = row_data[13] if len(row_data) > 13 else ''
+                if submitted and data['finished']:
+                    duration = compute_duration(submitted, data['finished'])
+                    scenarios_sheet.update_cell(row, 17, duration)
+            except: pass
+        if 'job_id' in data:
+            scenarios_sheet.update_cell(row, 16, data['job_id'])
         
+        invalidate_cache()
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -835,6 +914,25 @@ def test_compare():
     """Test endpoint to verify routing works"""
     return jsonify({'status': 'ok', 'message': 'Comparison routing is working!'})
 
+@app.route('/add_zaratan_columns')
+def add_zaratan_columns():
+    """One-time migration to add new Zaratan columns to Scenarios sheet"""
+    if not sheets_available():
+        return jsonify({'error': 'Sheets not available'}), 503
+    try:
+        headers = scenarios_sheet.row_values(1)
+        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration']
+        added = []
+        for col in new_cols:
+            if col not in headers:
+                next_col = len(headers) + 1
+                scenarios_sheet.update_cell(1, next_col, col)
+                headers.append(col)
+                added.append(col)
+        return jsonify({'status': 'success', 'added_columns': added, 'all_headers': headers})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/compare_scenarios', strict_slashes=False)
 def compare_scenarios():
     """Compare multiple scenarios and generate a report"""
@@ -992,67 +1090,186 @@ def compare_scenarios():
         report_lines.append("END OF REPORT")
         report_lines.append("=" * 80)
         
-        # Generate TXT report
-        txt_content = "\n".join(report_lines)
+        # =====================================================================
+        # Generate XLSX comparison spreadsheet (2 sheets)
+        # =====================================================================
+        import io
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         
-        # Generate CSV report
-        csv_lines = []
-        csv_lines.append("File Name,Status,Present In")
+        wb = Workbook()
         
-        # Create a comprehensive file presence map
-        file_scenario_map = {}  # file_name -> list of scenario names
+        # Build file -> folder map and file -> scenarios map
+        file_folder_map = {}
+        file_scenario_map = {}
+        
+        # Get folder info from input files sheet
+        try:
+            all_inputs = inputs_sheet.get_all_records()
+            for inp in all_inputs:
+                file_folder_map[inp.get('file_name', '')] = inp.get('folder_location', '')
+        except:
+            pass
+        
+        scenario_names_list = [s['scenario_name'] for s in scenarios]
+        
         for scenario in scenarios:
             for file_name in scenario['input_file_names']:
                 if file_name not in file_scenario_map:
-                    file_scenario_map[file_name] = []
-                file_scenario_map[file_name].append(scenario['scenario_name'])
+                    file_scenario_map[file_name] = set()
+                file_scenario_map[file_name].add(scenario['scenario_name'])
         
-        # Sort files alphabetically
-        for file_name in sorted(file_scenario_map.keys()):
-            scenario_names = file_scenario_map[file_name]
-            num_scenarios = len(scenario_names)
-            total_scenarios = len(scenarios)
-            
-            # Determine status
-            if num_scenarios == total_scenarios:
-                status = "Shared by all"
-            elif num_scenarios == 1:
-                status = f"Unique to {scenario_names[0]}"
-            else:
-                status = f"Present in {num_scenarios} of {total_scenarios}"
-            
-            # Present in column (semicolon-separated)
-            present_in = "; ".join(scenario_names)
-            
-            # Escape quotes and commas for CSV
-            file_name_clean = file_name.replace('"', '""')
-            status_clean = status.replace('"', '""')
-            present_in_clean = present_in.replace('"', '""')
-            
-            csv_lines.append(f'"{file_name_clean}","{status_clean}","{present_in_clean}"')
+        # Sort files A-Z
+        all_files_sorted = sorted(file_scenario_map.keys())
         
-        csv_content = "\n".join(csv_lines)
+        # --- Sheet 1: Presence Matrix (like R script output) ---
+        ws1 = wb.active
+        ws1.title = "Presence Matrix"
         
-        # Create a ZIP file with both TXT and CSV
-        import io
-        import zipfile
+        # Styles
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill("solid", fgColor="991B1B")  # Dark red
+        present_fill = PatternFill("solid", fgColor="D1FAE5")  # Light green
+        absent_fill = PatternFill("solid", fgColor="FEE2E2")   # Light red
+        border = Border(
+            left=Side(style='thin', color='D1D5DB'),
+            right=Side(style='thin', color='D1D5DB'),
+            top=Side(style='thin', color='D1D5DB'),
+            bottom=Side(style='thin', color='D1D5DB')
+        )
+        center_align = Alignment(horizontal='center', vertical='center')
         
-        zip_buffer = io.BytesIO()
+        # Headers
+        headers = ["File Name", "Folder"] + scenario_names_list
+        for col, header in enumerate(headers, 1):
+            cell = ws1.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = border
+        
+        # Data rows
+        for row_idx, file_name in enumerate(all_files_sorted, 2):
+            folder = file_folder_map.get(file_name, '')
+            present_in = file_scenario_map.get(file_name, set())
+            
+            # File name
+            cell = ws1.cell(row=row_idx, column=1, value=file_name)
+            cell.border = border
+            
+            # Folder
+            cell = ws1.cell(row=row_idx, column=2, value=folder)
+            cell.border = border
+            
+            # Scenario presence (1/0 with conditional formatting)
+            for sc_idx, sc_name in enumerate(scenario_names_list, 3):
+                is_present = sc_name in present_in
+                cell = ws1.cell(row=row_idx, column=sc_idx, value=1 if is_present else 0)
+                cell.alignment = center_align
+                cell.border = border
+                cell.fill = present_fill if is_present else absent_fill
+                cell.font = Font(bold=True, color="065F46" if is_present else "991B1B")
+        
+        # Summary row at bottom
+        summary_row = len(all_files_sorted) + 3
+        ws1.cell(row=summary_row, column=1, value="TOTAL FILES").font = Font(bold=True)
+        for sc_idx, sc_name in enumerate(scenario_names_list, 3):
+            count = sum(1 for f in all_files_sorted if sc_name in file_scenario_map.get(f, set()))
+            cell = ws1.cell(row=summary_row, column=sc_idx, value=count)
+            cell.font = Font(bold=True)
+            cell.alignment = center_align
+        
+        # Column widths
+        ws1.column_dimensions['A'].width = 40
+        ws1.column_dimensions['B'].width = 20
+        for i in range(3, 3 + len(scenario_names_list)):
+            from openpyxl.utils import get_column_letter
+            ws1.column_dimensions[get_column_letter(i)].width = max(15, len(scenario_names_list[i-3]) + 4)
+        
+        # Freeze top row
+        ws1.freeze_panes = 'A2'
+        
+        # --- Sheet 2: Summary (unique/shared with status) ---
+        ws2 = wb.create_sheet("Summary")
+        
+        # Headers
+        summary_headers = ["File Name", "Folder", "Status", "Present In"]
+        for col, header in enumerate(summary_headers, 1):
+            cell = ws2.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = border
+        
+        # Unique files first, then shared
+        unique_fill = PatternFill("solid", fgColor="FEF3C7")  # Light yellow
+        shared_fill = PatternFill("solid", fgColor="DBEAFE")   # Light blue
+        
+        current_row = 2
+        total_scenarios = len(scenarios)
+        
+        # Unique files first
+        for file_name in all_files_sorted:
+            present_in = file_scenario_map.get(file_name, set())
+            if len(present_in) < total_scenarios:
+                folder = file_folder_map.get(file_name, '')
+                
+                if len(present_in) == 1:
+                    status = f"Unique to {list(present_in)[0]}"
+                else:
+                    status = f"In {len(present_in)} of {total_scenarios} scenarios"
+                
+                present_str = "; ".join(sorted(present_in))
+                
+                ws2.cell(row=current_row, column=1, value=file_name).border = border
+                ws2.cell(row=current_row, column=2, value=folder).border = border
+                cell = ws2.cell(row=current_row, column=3, value=status)
+                cell.border = border
+                cell.fill = unique_fill
+                ws2.cell(row=current_row, column=4, value=present_str).border = border
+                current_row += 1
+        
+        # Separator row
+        sep_cell = ws2.cell(row=current_row, column=1, value=f"--- SHARED FILES ({len(shared_files)} files in all {total_scenarios} scenarios) ---")
+        sep_cell.font = Font(bold=True, color="1E40AF")
+        current_row += 1
+        
+        # Shared files
+        for file_name in sorted(shared_files):
+            folder = file_folder_map.get(file_name, '')
+            present_str = "; ".join(scenario_names_list)
+            
+            ws2.cell(row=current_row, column=1, value=file_name).border = border
+            ws2.cell(row=current_row, column=2, value=folder).border = border
+            cell = ws2.cell(row=current_row, column=3, value="Shared by all")
+            cell.border = border
+            cell.fill = shared_fill
+            ws2.cell(row=current_row, column=4, value=present_str).border = border
+            current_row += 1
+        
+        # Column widths
+        ws2.column_dimensions['A'].width = 40
+        ws2.column_dimensions['B'].width = 20
+        ws2.column_dimensions['C'].width = 30
+        ws2.column_dimensions['D'].width = 50
+        ws2.freeze_panes = 'A2'
+        
+        # Save to buffer
+        xlsx_buffer = io.BytesIO()
+        wb.save(xlsx_buffer)
+        xlsx_buffer.seek(0)
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            zip_file.writestr(f'scenario_comparison_{timestamp}.txt', txt_content)
-            zip_file.writestr(f'scenario_comparison_{timestamp}.csv', csv_content)
-        
-        zip_buffer.seek(0)
-        
         return Response(
-            zip_buffer.getvalue(),
-            mimetype='application/zip',
-            headers={'Content-Disposition': f'attachment;filename=scenario_comparison_{timestamp}.zip'}
+            xlsx_buffer.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': f'attachment;filename=scenario_comparison_{timestamp}.xlsx'}
         )
         
     except Exception as e:
+        import traceback
+        print(f"Comparison error: {traceback.format_exc()}")
         flash(f'Error comparing scenarios: {str(e)}', 'error')
         return redirect(url_for('index'))
 
@@ -1119,6 +1336,7 @@ def delete_scenario(scenario_id):
         
     except Exception as e:
         print(f"Error deleting scenario: {e}")
+        invalidate_cache()
         return jsonify({'success': False, 'error': str(e)})
 
 # =============================================================================

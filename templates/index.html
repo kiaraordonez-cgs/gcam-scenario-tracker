@@ -6,7 +6,7 @@
     <div class="action-bar">
         <div class="action-buttons">
             <form action="{{ url_for('upload_config') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
-                <input type="hidden" name="uploaded_by" value="User">
+                <input type="hidden" name="uploaded_by" value="Manual">
                 <label class="btn-upload">
                     📤 Upload Configuration
                     <input type="file" name="config_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
@@ -14,7 +14,7 @@
             </form>
             
             <form action="{{ url_for('upload_input') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
-                <input type="hidden" name="uploaded_by" value="User">
+                <input type="hidden" name="uploaded_by" value="Manual">
                 <label class="btn-upload">
                     📤 Upload Input File
                     <input type="file" name="input_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
@@ -36,7 +36,6 @@
             <span class="tab-count">{{ input_files|length }}</span>
         </button>
     </div>
-
 
     <!-- Scenarios Tab Content -->
     <div class="tab-content active" id="scenarios-tab">
@@ -66,6 +65,11 @@
                         <th class="sortable">Uploaded By</th>
                         <th class="sortable">Upload Date</th>
                         <th class="sortable">Input Files</th>
+                        <th class="sortable">Errors</th>
+                        <th class="sortable">Submitted</th>
+                        <th class="sortable">Finished</th>
+                        <th class="sortable">Job ID</th>
+                        <th class="sortable">Duration</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -88,9 +92,23 @@
                         <td class="editable" data-field="description">{{ scenario.description or '' }}</td>
                         <td class="editable" data-field="zaratan_link">{{ scenario.zaratan_link or '' }}</td>
                         <td class="editable" data-field="additional_notes">{{ scenario.additional_notes or '' }}</td>
-                        <td class="editable" data-field="uploaded_by">{{ scenario.uploaded_by or '' }}</td>
-                        <td>{{ scenario.upload_date[:10] }}</td>
+                        <td>
+                            <select class="inline-edit inline-edit-sm" onchange="updateScenario('{{ scenario.id }}', 'uploaded_by', this.value)">
+                                <option value="Manual" {% if scenario.uploaded_by == 'Manual' or scenario.uploaded_by == 'User' %}selected{% endif %}>Manual</option>
+                                <option value="Zaratan" {% if scenario.uploaded_by == 'Zaratan' %}selected{% endif %}>Zaratan</option>
+                            </select>
+                        </td>
+                        <td>{{ scenario.upload_date[:10] if scenario.upload_date else '' }}</td>
                         <td><span class="badge">{{ scenario.input_count }}</span></td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" class="error-checkbox" 
+                                   {% if scenario.errors %}checked{% endif %}
+                                   onchange="updateScenario('{{ scenario.id }}', 'errors', this.checked ? 'Yes' : '')">
+                        </td>
+                        <td class="editable" data-field="submitted">{{ scenario.submitted or '' }}</td>
+                        <td class="editable" data-field="finished">{{ scenario.finished or '' }}</td>
+                        <td class="editable" data-field="job_id">{{ scenario.job_id or '' }}</td>
+                        <td>{{ scenario.duration or '' }}</td>
                         <td>
                             <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn-small">Download</a>
                             <button onclick="deleteScenario('{{ scenario.id }}', '{{ scenario.scenario_name }}')" class="btn-small btn-danger">🗑️</button>
@@ -137,7 +155,7 @@
                         <td class="editable" data-field="description">{{ input.description or '' }}</td>
                         <td class="editable" data-field="additional_notes">{{ input.additional_notes or '' }}</td>
                         <td>{{ input.uploaded_by }}</td>
-                        <td>{{ input.upload_date[:10] }}</td>
+                        <td>{{ input.upload_date[:10] if input.upload_date else '' }}</td>
                         <td><span class="badge">{{ input.scenario_count }}</span></td>
                         <td>
                             {% if input.file_path %}
@@ -153,16 +171,6 @@
         </div>
     </div>
 </div>
-
-<!-- Compare Modal -->
-<div id="compare-modal" class="modal">
-    <div class="modal-content">
-        <span class="close">&times;</span>
-        <h2>Compare Input Files</h2>
-        <p>Select exactly 2 files to compare.</p>
-        <button onclick="executeCompare()" class="btn btn-primary">Compare Selected Files</button>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
@@ -173,15 +181,15 @@ function updateScenario(scenarioId, field, value) {
         if (newProject) {
             value = newProject;
         } else {
+            // Reset dropdown
+            if (event && event.target) event.target.selectedIndex = 0;
             return;
         }
     }
     
     fetch(`/update_scenario/${scenarioId}`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `${field}=${encodeURIComponent(value)}`
     }).then(() => location.reload());
 }
@@ -189,17 +197,16 @@ function updateScenario(scenarioId, field, value) {
 function updateInput(inputId, field, value) {
     fetch(`/update_input/${inputId}`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `${field}=${encodeURIComponent(value)}`
     });
 }
 
-// Editable cells
+// Editable cells - Scenarios
 document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
     cell.addEventListener('click', function() {
-        const currentValue = this.textContent;
+        if (this.querySelector('input')) return;
+        const currentValue = this.textContent.trim();
         const field = this.dataset.field;
         const scenarioId = this.closest('tr').dataset.id;
         
@@ -208,16 +215,10 @@ document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
         input.className = 'inline-edit';
         
         input.addEventListener('blur', function() {
-            const newValue = this.value;
-            cell.textContent = newValue;
-            updateScenario(scenarioId, field, newValue);
+            cell.textContent = this.value;
+            updateScenario(scenarioId, field, this.value);
         });
-        
-        input.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                this.blur();
-            }
-        });
+        input.addEventListener('keypress', function(e) { if (e.key === 'Enter') this.blur(); });
         
         this.textContent = '';
         this.appendChild(input);
@@ -225,9 +226,11 @@ document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
     });
 });
 
+// Editable cells - Inputs
 document.querySelectorAll('#inputs-table .editable').forEach(cell => {
     cell.addEventListener('click', function() {
-        const currentValue = this.textContent;
+        if (this.querySelector('input')) return;
+        const currentValue = this.textContent.trim();
         const field = this.dataset.field;
         const inputId = this.closest('tr').dataset.id;
         
@@ -236,16 +239,10 @@ document.querySelectorAll('#inputs-table .editable').forEach(cell => {
         input.className = 'inline-edit';
         
         input.addEventListener('blur', function() {
-            const newValue = this.value;
-            cell.textContent = newValue;
-            updateInput(inputId, field, newValue);
+            cell.textContent = this.value;
+            updateInput(inputId, field, this.value);
         });
-        
-        input.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                this.blur();
-            }
-        });
+        input.addEventListener('keypress', function(e) { if (e.key === 'Enter') this.blur(); });
         
         this.textContent = '';
         this.appendChild(input);
@@ -253,65 +250,40 @@ document.querySelectorAll('#inputs-table .editable').forEach(cell => {
     });
 });
 
-// Search functionality
+// Search
 document.getElementById('scenario-search').addEventListener('input', function() {
-    const searchTerm = this.value.toLowerCase();
-    const rows = document.querySelectorAll('#scenarios-table tbody tr');
-    
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    const s = this.value.toLowerCase();
+    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none';
     });
 });
 
 document.getElementById('input-search').addEventListener('input', function() {
-    const searchTerm = this.value.toLowerCase();
-    const rows = document.querySelectorAll('#inputs-table tbody tr');
-    
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    const s = this.value.toLowerCase();
+    document.querySelectorAll('#inputs-table tbody tr').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none';
     });
 });
 
 // Project filter
 document.getElementById('project-filter').addEventListener('change', function() {
-    const filterValue = this.value;
-    const rows = document.querySelectorAll('#scenarios-table tbody tr');
-    
-    rows.forEach(row => {
-        if (!filterValue || row.dataset.project === filterValue) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
+    const v = this.value;
+    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => {
+        r.style.display = (!v || r.dataset.project === v) ? '' : 'none';
     });
 });
 
-// Compare functionality and tab switching are now in script.js
-
-// Select all checkboxes
-document.getElementById('select-all').addEventListener('change', function() {
-    const checkboxes = document.querySelectorAll('.compare-checkbox');
-    checkboxes.forEach(cb => cb.checked = this.checked);
+// Select all
+document.getElementById('select-all-scenarios').addEventListener('change', function() {
+    document.querySelectorAll('.compare-checkbox').forEach(cb => cb.checked = this.checked);
 });
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', function() {
         const tabName = this.dataset.tab;
-        
-        // Hide all tab contents
-        document.querySelectorAll('.tab-content').forEach(content => {
-            content.classList.remove('active');
-        });
-        
-        // Remove active from all tabs
-        document.querySelectorAll('.tab-btn').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        
-        // Show selected tab
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
         document.getElementById(tabName + '-tab').classList.add('active');
         this.classList.add('active');
     });

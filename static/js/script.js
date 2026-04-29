@@ -1,302 +1,108 @@
-// Tab Switching and Setup
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('GCAM Scenario Tracker loaded');
-    
-    // Tab switching functionality
-    const tabButtons = document.querySelectorAll('.tab-btn');
-    
-    tabButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            const tabName = this.getAttribute('data-tab');
-            console.log('Switching to tab:', tabName);
-            
-            // Remove active class from all buttons and content
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            
-            // Add active class to clicked button and corresponding content
-            this.classList.add('active');
-            document.getElementById(tabName + '-tab').classList.add('active');
-        });
-    });
-    
-    // Search functionality for scenarios
-    const scenarioSearch = document.getElementById('scenario-search');
-    if (scenarioSearch) {
-        scenarioSearch.addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            const rows = document.querySelectorAll('#scenarios-table tbody tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(searchTerm) ? '' : 'none';
-            });
-        });
-    }
-    
-    // Search functionality for input files
-    const inputSearch = document.getElementById('input-search');
-    if (inputSearch) {
-        inputSearch.addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            const rows = document.querySelectorAll('#inputs-table tbody tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(searchTerm) ? '' : 'none';
-            });
-        });
-    }
-    
-    // Project filter
-    const projectFilter = document.getElementById('project-filter');
-    if (projectFilter) {
-        projectFilter.addEventListener('change', function(e) {
-            const selectedProject = e.target.value.toLowerCase();
-            const rows = document.querySelectorAll('#scenarios-table tbody tr');
-            
-            rows.forEach(row => {
-                if (!selectedProject) {
-                    row.style.display = '';
-                } else {
-                    const projectCell = row.cells[3]; // Project name column (after checkbox)
-                    const text = projectCell.textContent.toLowerCase();
-                    row.style.display = text.includes(selectedProject) ? '' : 'none';
-                }
-            });
-        });
-    }
-    
-    // Table Sorting Setup
+console.log('GCAM Scenario Tracker loaded');
+
+// =============================================================================
+// Table Sorting
+// =============================================================================
+function setupTableSorting() {
     console.log('Setting up table sorting...');
-    document.querySelectorAll('th.sortable').forEach((header) => {
-        // Make it obvious these are clickable
-        header.style.cursor = 'pointer';
-        header.title = 'Click to sort';
-        
-        header.addEventListener('click', function() {
-            console.log('Sorting column:', this.textContent);
+    document.querySelectorAll('table.data-table thead th.sortable').forEach(th => {
+        th.addEventListener('click', function() {
             const table = this.closest('table');
             const tbody = table.querySelector('tbody');
-            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const columnIndex = Array.from(this.parentNode.children).indexOf(this);
             
-            // Determine if this column is currently sorted
-            const currentSort = this.dataset.sort || 'none';
-            const newSort = currentSort === 'asc' ? 'desc' : 'asc';
-            console.log('Sort direction:', newSort);
+            // Determine sort direction
+            const currentSort = this.getAttribute('data-sort');
+            const isAsc = currentSort !== 'asc';
             
-            // Reset all headers in this table
-            table.querySelectorAll('th.sortable').forEach(th => {
-                delete th.dataset.sort;
-                th.style.fontWeight = 'normal';
-            });
-            
-            // Mark this header as sorted
-            this.dataset.sort = newSort;
-            this.style.fontWeight = 'bold';
-            
-            // Get column index
-            const headerIndex = Array.from(this.parentElement.children).indexOf(this);
+            // Clear all sort indicators in this table
+            table.querySelectorAll('th.sortable').forEach(h => h.removeAttribute('data-sort'));
+            this.setAttribute('data-sort', isAsc ? 'asc' : 'desc');
             
             // Sort rows
+            const rows = Array.from(tbody.querySelectorAll('tr'));
             rows.sort((a, b) => {
-                let aValue = a.children[headerIndex]?.textContent.trim() || '';
-                let bValue = b.children[headerIndex]?.textContent.trim() || '';
-                
-                // Try to parse as numbers
-                const aNum = parseFloat(aValue);
-                const bNum = parseFloat(bValue);
+                const aText = (a.cells[columnIndex]?.textContent || '').trim().toLowerCase();
+                const bText = (b.cells[columnIndex]?.textContent || '').trim().toLowerCase();
+                const aNum = parseFloat(aText);
+                const bNum = parseFloat(bText);
                 
                 if (!isNaN(aNum) && !isNaN(bNum)) {
-                    return newSort === 'asc' ? aNum - bNum : bNum - aNum;
+                    return isAsc ? aNum - bNum : bNum - aNum;
                 }
-                
-                // String comparison
-                if (newSort === 'asc') {
-                    return aValue.localeCompare(bValue);
-                } else {
-                    return bValue.localeCompare(aValue);
-                }
+                return isAsc ? aText.localeCompare(bText) : bText.localeCompare(aText);
             });
             
-            // Re-append rows in new order
             rows.forEach(row => tbody.appendChild(row));
-            console.log('Sorted', rows.length, 'rows');
         });
     });
-    
-    console.log('Setup complete');
-});
-
-// Compare scenarios modal
-function showCompareModal() {
-    const checkboxes = document.querySelectorAll('.compare-checkbox:checked');
-    console.log('Compare button clicked, found checkboxes:', checkboxes.length);
-    
-    if (checkboxes.length < 2) {
-        alert('Please select at least 2 scenarios to compare');
-        return;
-    }
-    
-    // Get all selected scenario IDs
-    const scenarioIds = Array.from(checkboxes).map(cb => cb.value);
-    console.log('Scenario IDs:', scenarioIds);
-    
-    // Redirect to comparison page
-    const url = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
-    console.log('Redirecting to:', url);
-    window.location.href = url;
+    console.log('Sorting setup complete');
 }
 
-// Delete scenario
-function deleteScenario(scenarioId, scenarioName) {
-    if (!confirm(`Are you sure you want to delete scenario "${scenarioName}"?\n\nThis will also remove all links to input files (but not the input files themselves).`)) {
-        return;
-    }
-    
-    // Send delete request
-    fetch(`/delete_scenario/${scenarioId}`, {
-        method: 'POST',
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Scenario deleted successfully');
-            location.reload();
-        } else {
-            alert('Error deleting scenario: ' + data.error);
-        }
-    })
-    .catch(error => {
-        alert('Error deleting scenario: ' + error);
-    });
-}
-
-// Column Filtering
-function setupColumnFilters() {
-    // Add filter inputs to table headers
-    document.querySelectorAll('table.data-table thead tr').forEach(headerRow => {
-        // Create a new row for filters
-        const filterRow = document.createElement('tr');
-        filterRow.className = 'filter-row';
-        
-        headerRow.querySelectorAll('th').forEach((th, index) => {
-            const filterCell = document.createElement('th');
-            
-            // Don't add filter to checkbox or actions columns
-            if (th.querySelector('input[type="checkbox"]') || th.textContent.trim() === 'Actions') {
-                filterCell.innerHTML = '';
-            } else {
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'column-filter';
-                input.placeholder = 'Filter...';
-                input.dataset.columnIndex = index;
-                
-                input.addEventListener('input', function() {
-                    filterTable(this.closest('table'));
-                });
-                
-                filterCell.appendChild(input);
-            }
-            
-            filterRow.appendChild(filterCell);
-        });
-        
-        // Insert filter row after header row
-        headerRow.parentNode.appendChild(filterRow);
-    });
-}
-
-function filterTable(table) {
-    const filterRow = table.querySelector('.filter-row');
-    const filters = Array.from(filterRow.querySelectorAll('.column-filter'));
-    const rows = table.querySelectorAll('tbody tr');
-    
-    rows.forEach(row => {
-        let showRow = true;
-        
-        filters.forEach((filter, index) => {
-            if (filter.value.trim() === '') return;
-            
-            const cell = row.cells[filter.dataset.columnIndex];
-            if (!cell) return;
-            
-            const cellText = cell.textContent.toLowerCase();
-            const filterText = filter.value.toLowerCase();
-            
-            if (!cellText.includes(filterText)) {
-                showRow = false;
-            }
-        });
-        
-        row.style.display = showRow ? '' : 'none';
-    });
-}
-
-// Initialize filters after DOM loads
-document.addEventListener('DOMContentLoaded', function() {
-    // Wait a bit for tables to be ready, then add filters
-    setTimeout(setupColumnFilters, 100);
-});
-// Column Filtering with Checkboxes
+// =============================================================================
+// Column Dropdown Filters
+// =============================================================================
 function setupColumnFilters() {
     document.querySelectorAll('table.data-table').forEach(table => {
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
-        const headerRow = thead.querySelector('tr');
+        if (!tbody || tbody.rows.length === 0) return;
         
-        // Create filter row
+        const headerRow = thead.querySelector('tr');
         const filterRow = document.createElement('tr');
         filterRow.className = 'filter-row';
         
-        headerRow.querySelectorAll('th').forEach((th, columnIndex) => {
+        headerRow.querySelectorAll('th').forEach((th, colIdx) => {
             const filterCell = document.createElement('th');
             
-            // Skip checkbox and actions columns
-            if (th.querySelector('input[type="checkbox"]') || th.textContent.trim() === 'Actions') {
+            // Skip checkbox, actions, badge columns
+            const text = th.textContent.trim();
+            if (th.querySelector('input[type="checkbox"]') || text === 'Actions') {
                 filterCell.innerHTML = '';
                 filterRow.appendChild(filterCell);
                 return;
             }
             
-            // Create dropdown filter
-            const select = document.createElement('select');
-            select.className = 'column-filter';
-            select.dataset.columnIndex = columnIndex;
-            
-            // Get unique values for this column
+            // Collect unique values
             const values = new Set();
             tbody.querySelectorAll('tr').forEach(row => {
-                const cell = row.cells[columnIndex];
+                const cell = row.cells[colIdx];
                 if (cell) {
-                    const text = cell.textContent.trim();
-                    if (text && text !== 'N/A') {
-                        values.add(text);
-                    }
+                    const val = cell.textContent.trim();
+                    if (val && val !== '' && val !== 'N/A') values.add(val);
                 }
             });
             
-            // Add "All" option
-            const allOption = document.createElement('option');
-            allOption.value = '';
-            allOption.textContent = `All (${values.size})`;
-            select.appendChild(allOption);
+            // Only add filter if there are values to filter by
+            if (values.size <= 1) {
+                filterCell.innerHTML = '';
+                filterRow.appendChild(filterCell);
+                return;
+            }
             
-            // Add value options (sorted)
-            Array.from(values).sort().forEach(value => {
-                const option = document.createElement('option');
-                option.value = value;
-                option.textContent = value.length > 30 ? value.substring(0, 27) + '...' : value;
-                option.title = value;
-                select.appendChild(option);
+            const select = document.createElement('select');
+            select.className = 'column-filter';
+            select.dataset.columnIndex = colIdx;
+            
+            // Default option - clean label
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = 'Filter ▾';
+            select.appendChild(defaultOpt);
+            
+            // Sorted unique values
+            Array.from(values).sort((a, b) => a.localeCompare(b)).forEach(val => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = val.length > 35 ? val.substring(0, 32) + '...' : val;
+                opt.title = val;
+                select.appendChild(opt);
             });
             
-            // Add change listener
             select.addEventListener('change', function() {
-                filterTable(table);
+                this.classList.toggle('active-filter', this.value !== '');
+                applyFilters(table);
             });
-            
             filterCell.appendChild(select);
             filterRow.appendChild(filterCell);
         });
@@ -305,28 +111,69 @@ function setupColumnFilters() {
     });
 }
 
-function filterTable(table) {
-    const filterRow = table.querySelector('.filter-row');
-    const filters = Array.from(filterRow.querySelectorAll('.column-filter'));
+function applyFilters(table) {
+    const filters = Array.from(table.querySelectorAll('.filter-row .column-filter'));
     const rows = table.querySelectorAll('tbody tr');
     
     rows.forEach(row => {
-        let showRow = true;
-        
+        let show = true;
         filters.forEach(filter => {
-            const filterValue = filter.value;
-            if (!filterValue) return; // "All" selected
-            
-            const columnIndex = parseInt(filter.dataset.columnIndex);
-            const cell = row.cells[columnIndex];
-            if (!cell) return;
-            
-            const cellText = cell.textContent.trim();
-            if (cellText !== filterValue) {
-                showRow = false;
-            }
+            const val = filter.value;
+            if (!val) return;
+            const colIdx = parseInt(filter.dataset.columnIndex);
+            const cell = row.cells[colIdx];
+            if (!cell || cell.textContent.trim() !== val) show = false;
         });
-        
-        row.style.display = showRow ? '' : 'none';
+        row.style.display = show ? '' : 'none';
     });
 }
+
+// =============================================================================
+// Compare Scenarios
+// =============================================================================
+function showCompareModal() {
+    const checked = document.querySelectorAll('.compare-checkbox:checked');
+    if (checked.length < 2) {
+        alert('Please select at least 2 scenarios to compare');
+        return;
+    }
+    
+    const scenarioIds = Array.from(checked).map(cb => cb.value);
+    const names = Array.from(checked).map(cb => {
+        const row = cb.closest('tr');
+        return row.cells[1].textContent.trim();
+    });
+    
+    if (confirm(`Compare ${checked.length} scenarios?\n\n${names.join('\n')}\n\nThis will download a comparison spreadsheet.`)) {
+        window.location.href = `/compare_scenarios?ids=${scenarioIds.join(',')}`;
+    }
+}
+
+// =============================================================================
+// Delete Scenario
+// =============================================================================
+function deleteScenario(scenarioId, scenarioName) {
+    if (!confirm(`Delete scenario "${scenarioName}"?\n\nThis cannot be undone.`)) return;
+    
+    fetch(`/delete_scenario/${scenarioId}`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(err => {
+            alert('Error deleting scenario');
+            console.error(err);
+        });
+}
+
+// =============================================================================
+// Initialize
+// =============================================================================
+document.addEventListener('DOMContentLoaded', function() {
+    setupTableSorting();
+    setupColumnFilters();
+});
