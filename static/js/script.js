@@ -160,6 +160,11 @@ function deleteScenario(scenarioId, scenarioName) {
 // Initialize
 // =============================================================================
 document.addEventListener('DOMContentLoaded', function() {
-    setupTableSorting();
-    setupColumnFilters();
+    // Sorting and filters are initialized by loadData() in index.html
+    // Only set them up here if data is already in the DOM (non-AJAX pages)
+    if (document.querySelector('#scenarios-tbody .loading-row') === null &&
+        document.querySelectorAll('#scenarios-table tbody tr').length > 0) {
+        setupTableSorting();
+        setupColumnFilters();
+    }
 });
