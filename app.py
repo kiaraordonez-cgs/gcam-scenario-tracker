@@ -474,9 +474,13 @@ def api_data():
     junction_records = cached['junctions']
     input_files = cached['inputs']
     
-    # Compute counts and durations
+    # Build set of valid scenario IDs to filter out orphaned junctions
+    valid_scenario_ids = set(str(s.get('id')) for s in scenarios)
+    valid_junctions = [j for j in junction_records if str(j.get('scenario_id')) in valid_scenario_ids]
+    
+    # Compute counts using only valid junctions
     for record in scenarios:
-        record['input_count'] = sum(1 for j in junction_records if str(j.get('scenario_id')) == str(record.get('id')))
+        record['input_count'] = sum(1 for j in valid_junctions if str(j.get('scenario_id')) == str(record.get('id')))
         submitted = str(record.get('submitted', ''))
         finished = str(record.get('finished', ''))
         if submitted and finished:
@@ -485,7 +489,7 @@ def api_data():
             record['duration'] = ''
     
     for record in input_files:
-        record['scenario_count'] = sum(1 for j in junction_records if str(j.get('input_file_id')) == str(record.get('id')))
+        record['scenario_count'] = sum(1 for j in valid_junctions if str(j.get('input_file_id')) == str(record.get('id')))
     
     projects = sorted(set([s.get('project_name', '') for s in scenarios if s.get('project_name')]))
     
