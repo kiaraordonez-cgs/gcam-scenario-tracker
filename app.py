@@ -454,19 +454,21 @@ def health():
 
 @app.route('/')
 def index():
-    """Main dashboard"""
+    """Main dashboard - loads instantly, data fetched via AJAX"""
+    return render_template('index.html',
+                         scenarios=[],
+                         input_files=[],
+                         projects=[])
+
+@app.route('/api/data')
+def api_data():
+    """JSON endpoint for dashboard data - called via AJAX after page loads"""
     if not sheets_available():
-        flash('Google Sheets connection unavailable. Please try again in a moment.', 'warning')
-        return render_template('index.html',
-                             scenarios=[],
-                             input_files=[],
-                             projects=[])
+        return jsonify({'error': 'Sheets unavailable'}), 503
     
-    # Use cached data to reduce API calls (3 calls -> 0 on cache hit)
     cached = get_cached_data()
     if not cached:
-        flash('Error loading data. Please refresh.', 'warning')
-        return render_template('index.html', scenarios=[], input_files=[], projects=[])
+        return jsonify({'error': 'Could not load data'}), 500
     
     scenarios = cached['scenarios']
     junction_records = cached['junctions']
@@ -475,7 +477,6 @@ def index():
     # Compute counts and durations
     for record in scenarios:
         record['input_count'] = sum(1 for j in junction_records if str(j.get('scenario_id')) == str(record.get('id')))
-        # Compute duration if submitted and finished exist
         submitted = str(record.get('submitted', ''))
         finished = str(record.get('finished', ''))
         if submitted and finished:
@@ -486,13 +487,13 @@ def index():
     for record in input_files:
         record['scenario_count'] = sum(1 for j in junction_records if str(j.get('input_file_id')) == str(record.get('id')))
     
-    # Get unique projects for dropdown
     projects = sorted(set([s.get('project_name', '') for s in scenarios if s.get('project_name')]))
     
-    return render_template('index.html',
-                         scenarios=scenarios,
-                         input_files=input_files,
-                         projects=projects)
+    return jsonify({
+        'scenarios': scenarios,
+        'input_files': input_files,
+        'projects': projects
+    })
 
 @app.route('/upload_config', methods=['POST'])
 def upload_config():

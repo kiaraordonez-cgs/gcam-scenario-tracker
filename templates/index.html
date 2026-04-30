@@ -2,7 +2,6 @@
 
 {% block content %}
 <div class="dashboard">
-    <!-- Compact Header with Upload Actions -->
     <div class="action-bar">
         <div class="action-buttons">
             <form action="{{ url_for('upload_config') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
@@ -12,7 +11,6 @@
                     <input type="file" name="config_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
                 </label>
             </form>
-            
             <form action="{{ url_for('upload_input') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
                 <input type="hidden" name="uploaded_by" value="Manual">
                 <label class="btn-upload">
@@ -23,145 +21,71 @@
         </div>
     </div>
 
-    <!-- Tab Navigation -->
     <div class="tab-navigation">
         <button class="tab-btn active" data-tab="scenarios">
-            <span class="tab-icon">📊</span>
-            Scenarios
-            <span class="tab-count">{{ scenarios|length }}</span>
+            <span class="tab-icon">📊</span> Scenarios
+            <span class="tab-count" id="scenarios-count">...</span>
         </button>
         <button class="tab-btn" data-tab="inputs">
-            <span class="tab-icon">📄</span>
-            Input Files
-            <span class="tab-count">{{ input_files|length }}</span>
+            <span class="tab-icon">📄</span> Input Files
+            <span class="tab-count" id="inputs-count">...</span>
         </button>
     </div>
 
-    <!-- Scenarios Tab Content -->
     <div class="tab-content active" id="scenarios-tab">
         <div class="table-controls">
             <input type="text" id="scenario-search" placeholder="🔍 Search scenarios..." class="search-box">
-            <select id="project-filter" class="filter-select">
-                <option value="">All Projects</option>
-                {% for project in projects %}
-                <option value="{{ project }}">{{ project }}</option>
-                {% endfor %}
-            </select>
+            <select id="project-filter" class="filter-select"><option value="">All Projects</option></select>
             <button onclick="showCompareModal()" class="btn-upload" style="margin-left: auto;">Compare Selected</button>
         </div>
-        
         <div class="table-wrapper">
             <table class="data-table sortable" id="scenarios-table">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="select-all-scenarios"></th>
-                        <th class="sortable">Scenario Name</th>
-                        <th class="sortable">Other Name</th>
-                        <th class="sortable">Project</th>
-                        <th class="sortable">Submitted</th>
-                        <th class="sortable">Finished</th>
-                        <th class="sortable">Errors</th>
-                        <th class="sortable">Description</th>
-                        <th class="sortable">Zaratan Link</th>
-                        <th class="sortable">Job ID</th>
-                        <th class="sortable">Notes</th>
-                        <th class="sortable">Uploaded By</th>
-                        <th class="sortable">Upload Date</th>
-                        <th class="sortable">Input Files</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for scenario in scenarios %}
-                    <tr data-id="{{ scenario.id }}" data-project="{{ scenario.project_name or '' }}">
-                        <td><input type="checkbox" class="compare-checkbox" value="{{ scenario.id }}"></td>
-                        <td><a href="{{ url_for('scenario_detail', scenario_id=scenario.id) }}">{{ scenario.scenario_name }}</a></td>
-                        <td class="editable" data-field="personal_scenario_name">{{ scenario.personal_scenario_name or '' }}</td>
-                        <td class="editable-dropdown" data-field="project_name">
-                            <select class="inline-edit" onchange="updateScenario('{{ scenario.id }}', 'project_name', this.value)">
-                                <option value="">Select...</option>
-                                {% for project in projects %}
-                                <option value="{{ project }}" {% if scenario.project_name == project %}selected{% endif %}>{{ project }}</option>
-                                {% endfor %}
-                                <option value="__new__">+ Add New</option>
-                            </select>
-                        </td>
-                        <td class="editable" data-field="submitted">{{ scenario.submitted or '' }}</td>
-                        <td class="editable" data-field="finished">{{ scenario.finished or '' }}</td>
-                        <td style="text-align: center;">
-                            <input type="checkbox" class="error-checkbox" 
-                                   {% if scenario.errors %}checked{% endif %}
-                                   onchange="updateScenario('{{ scenario.id }}', 'errors', this.checked ? 'Yes' : '')">
-                        </td>
-                        <td class="editable" data-field="description">{{ scenario.description or '' }}</td>
-                        <td class="editable" data-field="zaratan_link">{{ scenario.zaratan_link or '' }}</td>
-                        <td class="editable" data-field="job_id">{{ scenario.job_id or '' }}</td>
-                        <td class="editable" data-field="additional_notes">{{ scenario.additional_notes or '' }}</td>
-                        <td>
-                            <select class="inline-edit inline-edit-sm" onchange="updateScenario('{{ scenario.id }}', 'uploaded_by', this.value)">
-                                <option value="Manual" {% if scenario.uploaded_by == 'Manual' or scenario.uploaded_by == 'User' %}selected{% endif %}>Manual</option>
-                                <option value="Zaratan" {% if scenario.uploaded_by == 'Zaratan' %}selected{% endif %}>Zaratan</option>
-                            </select>
-                        </td>
-                        <td>{{ scenario.upload_date[:10] if scenario.upload_date else '' }}</td>
-                        <td><span class="badge">{{ scenario.input_count }}</span></td>
-                        <td>
-                            <a href="{{ url_for('download_file', file_type='config', file_id=scenario.id) }}" class="btn-small">Download</a>
-                            <button onclick="deleteScenario('{{ scenario.id }}', '{{ scenario.scenario_name }}')" class="btn-small btn-danger">🗑️</button>
-                        </td>
-                    </tr>
-                    {% endfor %}
+                <thead><tr>
+                    <th><input type="checkbox" id="select-all-scenarios"></th>
+                    <th class="sortable">Scenario Name</th>
+                    <th class="sortable">Other Name</th>
+                    <th class="sortable">Project</th>
+                    <th class="sortable">Submitted</th>
+                    <th class="sortable">Finished</th>
+                    <th class="sortable">Errors</th>
+                    <th class="sortable">Description</th>
+                    <th class="sortable">Zaratan Link</th>
+                    <th class="sortable">Job ID</th>
+                    <th class="sortable">Notes</th>
+                    <th class="sortable">Uploaded By</th>
+                    <th class="sortable">Upload Date</th>
+                    <th class="sortable">Input Files</th>
+                    <th>Actions</th>
+                </tr></thead>
+                <tbody id="scenarios-tbody">
+                    <tr><td colspan="15" style="text-align:center;padding:40px;color:#6b7280;">Loading scenarios...</td></tr>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Input Files Tab Content -->
     <div class="tab-content" id="inputs-tab">
         <div class="table-controls">
             <input type="text" id="input-search" placeholder="🔍 Search input files..." class="search-box">
         </div>
         <div class="table-wrapper">
             <table class="data-table sortable" id="inputs-table">
-                <thead>
-                    <tr>
-                        <th class="sortable">File Name</th>
-                        <th class="sortable">Regions Modified</th>
-                        <th class="sortable">Years Modified</th>
-                        <th class="sortable">Sectors Modified</th>
-                        <th class="sortable">Policy Name</th>
-                        <th class="sortable">Folder Location</th>
-                        <th class="sortable">Description</th>
-                        <th class="sortable">Notes</th>
-                        <th class="sortable">Uploaded By</th>
-                        <th class="sortable">Upload Date</th>
-                        <th class="sortable">Used In Scenarios</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for input in input_files %}
-                    <tr data-id="{{ input.id }}">
-                        <td><a href="{{ url_for('input_detail', input_id=input.id) }}">{{ input.file_name }}</a></td>
-                        <td>{{ input.regions_modified or 'N/A' }}</td>
-                        <td>{{ input.years_modified or 'N/A' }}</td>
-                        <td>{{ input.sectors_modified or 'N/A' }}</td>
-                        <td class="editable" data-field="policy_name">{{ input.policy_name or '' }}</td>
-                        <td class="editable" data-field="folder_location">{{ input.folder_location or '' }}</td>
-                        <td class="editable" data-field="description">{{ input.description or '' }}</td>
-                        <td class="editable" data-field="additional_notes">{{ input.additional_notes or '' }}</td>
-                        <td>{{ input.uploaded_by }}</td>
-                        <td>{{ input.upload_date[:10] if input.upload_date else '' }}</td>
-                        <td><span class="badge">{{ input.scenario_count }}</span></td>
-                        <td>
-                            {% if input.file_path %}
-                            <a href="{{ url_for('download_file', file_type='input', file_id=input.id) }}" class="btn-small">Download</a>
-                            {% else %}
-                            <span class="text-muted">No file</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
+                <thead><tr>
+                    <th class="sortable">File Name</th>
+                    <th class="sortable">Regions Modified</th>
+                    <th class="sortable">Years Modified</th>
+                    <th class="sortable">Sectors Modified</th>
+                    <th class="sortable">Policy Name</th>
+                    <th class="sortable">Folder Location</th>
+                    <th class="sortable">Description</th>
+                    <th class="sortable">Notes</th>
+                    <th class="sortable">Uploaded By</th>
+                    <th class="sortable">Upload Date</th>
+                    <th class="sortable">Used In Scenarios</th>
+                    <th>Actions</th>
+                </tr></thead>
+                <tbody id="inputs-tbody">
+                    <tr><td colspan="12" style="text-align:center;padding:40px;color:#6b7280;">Loading input files...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -171,118 +95,168 @@
 
 {% block scripts %}
 <script>
-function updateScenario(scenarioId, field, value) {
-    if (value === '__new__') {
-        const newProject = prompt('Enter new project name:');
-        if (newProject) {
-            value = newProject;
-        } else {
-            // Reset dropdown
-            if (event && event.target) event.target.selectedIndex = 0;
-            return;
-        }
+function esc(val) {
+    if (val == null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(val);
+    return d.innerHTML;
+}
+
+function loadData() {
+    fetch('/api/data')
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                document.getElementById('scenarios-tbody').innerHTML =
+                    '<tr><td colspan="15" style="text-align:center;padding:40px;color:#991b1b;">Error loading data. Please refresh.</td></tr>';
+                return;
+            }
+            renderScenarios(data.scenarios, data.projects);
+            renderInputFiles(data.input_files);
+            document.getElementById('scenarios-count').textContent = data.scenarios.length;
+            document.getElementById('inputs-count').textContent = data.input_files.length;
+            setupTableSorting();
+            setupColumnFilters();
+            setupEditableCells();
+        })
+        .catch(err => {
+            console.error('Load error:', err);
+            document.getElementById('scenarios-tbody').innerHTML =
+                '<tr><td colspan="15" style="text-align:center;padding:40px;color:#991b1b;">Connection error. Please refresh.</td></tr>';
+        });
+}
+
+function renderScenarios(scenarios, projects) {
+    const pf = document.getElementById('project-filter');
+    pf.innerHTML = '<option value="">All Projects</option>' +
+        projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+
+    const tbody = document.getElementById('scenarios-tbody');
+    if (!scenarios.length) {
+        tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;padding:40px;color:#6b7280;">No scenarios yet.</td></tr>';
+        return;
     }
-    
-    fetch(`/update_scenario/${scenarioId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `${field}=${encodeURIComponent(value)}`
-    }).then(() => location.reload());
+    tbody.innerHTML = scenarios.map(s => {
+        const ud = s.upload_date ? String(s.upload_date).substring(0,10) : '';
+        const ub = s.uploaded_by || '';
+        const isManual = (ub === 'Manual' || ub === 'User' || !ub);
+        return `<tr data-id="${esc(s.id)}" data-project="${esc(s.project_name||'')}">
+            <td><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
+            <td><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
+            <td class="editable" data-field="personal_scenario_name">${esc(s.personal_scenario_name||'')}</td>
+            <td><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','project_name',this.value)">
+                <option value="">Select...</option>
+                ${projects.map(p=>`<option value="${esc(p)}" ${s.project_name===p?'selected':''}>${esc(p)}</option>`).join('')}
+                <option value="__new__">+ Add New</option>
+            </select></td>
+            <td class="editable" data-field="submitted">${esc(s.submitted||'')}</td>
+            <td class="editable" data-field="finished">${esc(s.finished||'')}</td>
+            <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateScenario('${esc(s.id)}','errors',this.checked?'Yes':'')"></td>
+            <td class="editable" data-field="description">${esc(s.description||'')}</td>
+            <td class="editable" data-field="zaratan_link">${esc(s.zaratan_link||'')}</td>
+            <td class="editable" data-field="job_id">${esc(s.job_id||'')}</td>
+            <td class="editable" data-field="additional_notes">${esc(s.additional_notes||'')}</td>
+            <td><select class="inline-edit inline-edit-sm" onchange="updateScenario('${esc(s.id)}','uploaded_by',this.value)">
+                <option value="Manual" ${isManual?'selected':''}>Manual</option>
+                <option value="Zaratan" ${ub==='Zaratan'?'selected':''}>Zaratan</option>
+            </select></td>
+            <td>${esc(ud)}</td>
+            <td><span class="badge">${s.input_count||0}</span></td>
+            <td>
+                <a href="/download/config/${esc(s.id)}" class="btn-small">Download</a>
+                <button onclick="deleteScenario('${esc(s.id)}','${esc(s.scenario_name)}')" class="btn-small btn-danger">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
 }
 
-function updateInput(inputId, field, value) {
-    fetch(`/update_input/${inputId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `${field}=${encodeURIComponent(value)}`
+function renderInputFiles(inputs) {
+    const tbody = document.getElementById('inputs-tbody');
+    if (!inputs.length) {
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:40px;color:#6b7280;">No input files yet.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = inputs.map(inp => {
+        const ud = inp.upload_date ? String(inp.upload_date).substring(0,10) : '';
+        return `<tr data-id="${esc(inp.id)}">
+            <td><a href="/input/${esc(inp.id)}">${esc(inp.file_name)}</a></td>
+            <td>${esc(inp.regions_modified||'N/A')}</td>
+            <td>${esc(inp.years_modified||'N/A')}</td>
+            <td>${esc(inp.sectors_modified||'N/A')}</td>
+            <td class="editable" data-field="policy_name">${esc(inp.policy_name||'')}</td>
+            <td class="editable" data-field="folder_location">${esc(inp.folder_location||'')}</td>
+            <td class="editable" data-field="description">${esc(inp.description||'')}</td>
+            <td class="editable" data-field="additional_notes">${esc(inp.additional_notes||'')}</td>
+            <td>${esc(inp.uploaded_by||'')}</td>
+            <td>${esc(ud)}</td>
+            <td><span class="badge">${inp.scenario_count||0}</span></td>
+            <td>${inp.file_path ? `<a href="/download/input/${esc(inp.id)}" class="btn-small">Download</a>` : '<span class="text-muted">No file</span>'}</td>
+        </tr>`;
+    }).join('');
+}
+
+function setupEditableCells() {
+    document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
+        cell.addEventListener('click', function() {
+            if (this.querySelector('input')) return;
+            const val = this.textContent.trim(), field = this.dataset.field, id = this.closest('tr').dataset.id;
+            const input = document.createElement('input');
+            input.value = val; input.className = 'inline-edit';
+            input.addEventListener('blur', function() { cell.textContent = this.value; updateScenario(id, field, this.value); });
+            input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
+            this.textContent = ''; this.appendChild(input); input.focus();
+        });
+    });
+    document.querySelectorAll('#inputs-table .editable').forEach(cell => {
+        cell.addEventListener('click', function() {
+            if (this.querySelector('input')) return;
+            const val = this.textContent.trim(), field = this.dataset.field, id = this.closest('tr').dataset.id;
+            const input = document.createElement('input');
+            input.value = val; input.className = 'inline-edit';
+            input.addEventListener('blur', function() { cell.textContent = this.value; updateInput(id, field, this.value); });
+            input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
+            this.textContent = ''; this.appendChild(input); input.focus();
+        });
     });
 }
 
-// Editable cells - Scenarios
-document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
-    cell.addEventListener('click', function() {
-        if (this.querySelector('input')) return;
-        const currentValue = this.textContent.trim();
-        const field = this.dataset.field;
-        const scenarioId = this.closest('tr').dataset.id;
-        
-        const input = document.createElement('input');
-        input.value = currentValue;
-        input.className = 'inline-edit';
-        
-        input.addEventListener('blur', function() {
-            cell.textContent = this.value;
-            updateScenario(scenarioId, field, this.value);
-        });
-        input.addEventListener('keypress', function(e) { if (e.key === 'Enter') this.blur(); });
-        
-        this.textContent = '';
-        this.appendChild(input);
-        input.focus();
-    });
-});
+function updateScenario(id, field, value) {
+    if (value === '__new__') {
+        const n = prompt('Enter new project name:');
+        if (n) value = n; else { if(event&&event.target) event.target.selectedIndex=0; return; }
+    }
+    fetch(`/update_scenario/${id}`, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`${field}=${encodeURIComponent(value)}` }).then(()=>location.reload());
+}
 
-// Editable cells - Inputs
-document.querySelectorAll('#inputs-table .editable').forEach(cell => {
-    cell.addEventListener('click', function() {
-        if (this.querySelector('input')) return;
-        const currentValue = this.textContent.trim();
-        const field = this.dataset.field;
-        const inputId = this.closest('tr').dataset.id;
-        
-        const input = document.createElement('input');
-        input.value = currentValue;
-        input.className = 'inline-edit';
-        
-        input.addEventListener('blur', function() {
-            cell.textContent = this.value;
-            updateInput(inputId, field, this.value);
-        });
-        input.addEventListener('keypress', function(e) { if (e.key === 'Enter') this.blur(); });
-        
-        this.textContent = '';
-        this.appendChild(input);
-        input.focus();
-    });
-});
+function updateInput(id, field, value) {
+    fetch(`/update_input/${id}`, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`${field}=${encodeURIComponent(value)}` });
+}
 
-// Search
 document.getElementById('scenario-search').addEventListener('input', function() {
     const s = this.value.toLowerCase();
-    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none';
-    });
+    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => { r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none'; });
 });
-
 document.getElementById('input-search').addEventListener('input', function() {
     const s = this.value.toLowerCase();
-    document.querySelectorAll('#inputs-table tbody tr').forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none';
-    });
+    document.querySelectorAll('#inputs-table tbody tr').forEach(r => { r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none'; });
 });
-
-// Project filter
 document.getElementById('project-filter').addEventListener('change', function() {
     const v = this.value;
-    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => {
-        r.style.display = (!v || r.dataset.project === v) ? '' : 'none';
-    });
+    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => { r.style.display = (!v||r.dataset.project===v) ? '' : 'none'; });
 });
-
-// Select all
 document.getElementById('select-all-scenarios').addEventListener('change', function() {
     document.querySelectorAll('.compare-checkbox').forEach(cb => cb.checked = this.checked);
 });
-
-// Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', function() {
-        const tabName = this.dataset.tab;
+        const t = this.dataset.tab;
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
-        document.getElementById(tabName + '-tab').classList.add('active');
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(t+'-tab').classList.add('active');
         this.classList.add('active');
     });
 });
+
+loadData();
 </script>
 {% endblock %}
