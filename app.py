@@ -30,7 +30,108 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
-GOOGLE_SHEET_ID = '1n1dwcHThv_I19lWkuNhAK5rlscnyMGlM2x-VoR4R8rs'
+GOOGLE_SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', '1n1dwcHThv_I19lWkuNhAK5rlscnyMGlM2x-VoR4R8rs')
+
+# =============================================================================
+# Naming Convention Mappings (loaded from CSV files)
+# =============================================================================
+# Filename pattern: configuration_PROJECT_scenarioAbbrev_YYMMDD-FL_comment.xml
+
+import csv
+
+def load_csv_mapping(filepath, key_col, value_col):
+    """Load a CSV file into a dict mapping key_col -> value_col"""
+    mapping = {}
+    try:
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                k = row.get(key_col, '').strip()
+                v = row.get(value_col, '').strip()
+                if k and v:
+                    mapping[k] = v
+    except FileNotFoundError:
+        print(f"Warning: Mapping file not found: {filepath}")
+    except Exception as e:
+        print(f"Warning: Error loading {filepath}: {e}")
+    return mapping
+
+# Load mappings from CSV files (in mappings/ directory next to app.py)
+MAPPINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mappings')
+PROJECT_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'projects.csv'), 'code', 'name')
+PERSON_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'people.csv'), 'initials', 'name')
+
+print(f"Loaded {len(PROJECT_MAP)} project mappings: {PROJECT_MAP}")
+print(f"Loaded {len(PERSON_MAP)} person mappings: {PERSON_MAP}")
+
+def parse_scenario_filename(filename):
+    """Parse configuration filename to extract metadata.
+    
+    Pattern: configuration_PROJECT_abbrev_YYMMDD-FL_comment.xml
+    Returns dict with extracted fields, or empty dict if pattern doesn't match.
+    """
+    result = {}
+    
+    name = filename
+    if name.lower().startswith('configuration_'):
+        name = name[14:]
+    if name.lower().endswith('.xml'):
+        name = name[:-4]
+    if not name:
+        return result
+    
+    parts = name.split('_')
+    if len(parts) < 3:
+        return result
+    
+    # First part: project code
+    project_code = parts[0]
+    if project_code in PROJECT_MAP:
+        result['project_name'] = PROJECT_MAP[project_code]
+        result['project_code'] = project_code
+    
+    # Find the part with YYMMDD-FL (contains a dash with 6-digit date)
+    date_person_idx = None
+    for i, part in enumerate(parts):
+        if '-' in part:
+            segments = part.split('-')
+            if len(segments) >= 2 and segments[0].isdigit() and len(segments[0]) == 6:
+                date_person_idx = i
+                break
+    
+    if date_person_idx is not None:
+        segments = parts[date_person_idx].split('-')
+        
+        # Parse date: YYMMDD
+        date_str = segments[0]
+        try:
+            year = int('20' + date_str[:2])
+            month = int(date_str[2:4])
+            day = int(date_str[4:6])
+            result['date_run'] = f'{year}-{month:02d}-{day:02d}'
+        except (ValueError, IndexError):
+            pass
+        
+        # Parse initials
+        if len(segments) >= 2:
+            initials = segments[1].upper()
+            if initials in PERSON_MAP:
+                result['person_name'] = PERSON_MAP[initials]
+                result['person_initials'] = initials
+        
+        # Scenario abbreviation: everything between project code and date
+        abbrev_parts = parts[1:date_person_idx]
+        if abbrev_parts:
+            result['scenario_abbrev'] = '_'.join(abbrev_parts)
+        
+        # Comment: everything after date-initials
+        comment_parts = parts[date_person_idx + 1:]
+        if comment_parts:
+            result['comment'] = '_'.join(comment_parts)
+    else:
+        result['scenario_abbrev'] = '_'.join(parts[1:])
+    
+    return result
 GOOGLE_DRIVE_FOLDER_ID = '1RY61HJn1nWGsOlbjBE1lnbsEIH16TTfR'
 
 ALLOWED_EXTENSIONS = {'xml'}
@@ -123,7 +224,7 @@ def sheets_available():
 
 # Simple in-memory cache to speed up page loads
 _cache = {'data': None, 'timestamp': 0}
-CACHE_TTL = 30  # seconds
+CACHE_TTL = 60  # seconds - longer cache = fewer API calls
 
 def get_cached_data():
     """Get all sheet data with caching to reduce API calls"""
@@ -460,6 +561,16 @@ def index():
                          input_files=[],
                          projects=[])
 
+@app.route('/api/mappings')
+def api_mappings():
+    """View current project and person mappings"""
+    return jsonify({
+        'projects': PROJECT_MAP,
+        'people': PERSON_MAP,
+        'filename_pattern': 'configuration_PROJECT_scenarioAbbrev_YYMMDD-FL_comment.xml',
+        'example': 'configuration_USAI_HA1_250206-KO_GDPPOPhigh.xml'
+    })
+
 @app.route('/api/data')
 def api_data():
     """JSON endpoint for dashboard data - called via AJAX after page loads"""
@@ -476,11 +587,19 @@ def api_data():
     
     # Build set of valid scenario IDs to filter out orphaned junctions
     valid_scenario_ids = set(str(s.get('id')) for s in scenarios)
-    valid_junctions = [j for j in junction_records if str(j.get('scenario_id')) in valid_scenario_ids]
     
-    # Compute counts using only valid junctions
+    # Pre-build count dicts for O(1) lookups instead of O(n) scans per record
+    scenario_input_counts = {}
+    input_scenario_counts = {}
+    for j in junction_records:
+        sid = str(j.get('scenario_id', ''))
+        iid = str(j.get('input_file_id', ''))
+        if sid in valid_scenario_ids:
+            scenario_input_counts[sid] = scenario_input_counts.get(sid, 0) + 1
+            input_scenario_counts[iid] = input_scenario_counts.get(iid, 0) + 1
+    
     for record in scenarios:
-        record['input_count'] = sum(1 for j in valid_junctions if str(j.get('scenario_id')) == str(record.get('id')))
+        record['input_count'] = scenario_input_counts.get(str(record.get('id')), 0)
         submitted = str(record.get('submitted', ''))
         finished = str(record.get('finished', ''))
         if submitted and finished:
@@ -489,7 +608,7 @@ def api_data():
             record['duration'] = ''
     
     for record in input_files:
-        record['scenario_count'] = sum(1 for j in valid_junctions if str(j.get('input_file_id')) == str(record.get('id')))
+        record['scenario_count'] = input_scenario_counts.get(str(record.get('id')), 0)
     
     projects = sorted(set([s.get('project_name', '') for s in scenarios if s.get('project_name')]))
     
@@ -532,19 +651,30 @@ def upload_config():
         # Parse configuration
         parsed = parse_configuration_xml(file_content)
         
+        # Parse filename for auto-fill metadata
+        meta = parse_scenario_filename(filename)
+        
         # Add scenario to sheet with UUID
         scenario_id = str(uuid.uuid4())[:8]  # Short unique ID (8 chars)
         upload_date = datetime.now().isoformat()
         
+        # Auto-fill from filename parsing
+        project_name = meta.get('project_name', '')
+        scenario_abbrev = meta.get('scenario_abbrev', '')
+        date_run = meta.get('date_run', '')
+        comment = meta.get('comment', '')
+        person_name = meta.get('person_name', '')
+        description = f'Run by {person_name}' if person_name else ''
+        
         scenarios_sheet.append_row([
             scenario_id,
             parsed['scenario_name'],
-            '',  # personal_scenario_name
-            '',  # project_name
-            '',  # date_run
-            '',  # description
+            scenario_abbrev,  # personal_scenario_name / Other Name
+            project_name,  # project_name
+            date_run,  # date_run
+            description,  # description
             '',  # zaratan_link
-            '',  # additional_notes
+            comment,  # additional_notes
             uploaded_by,
             upload_date,
             file_id,
@@ -610,7 +740,16 @@ def upload_config():
         if junctions_to_add:
             junction_sheet.append_rows(junctions_to_add)
         
-        flash(f'Successfully uploaded scenario "{parsed["scenario_name"]}" with {len(parsed["input_files"])} input files', 'success')
+        # Build descriptive flash message
+        auto_filled = []
+        if project_name: auto_filled.append(f'Project: {project_name}')
+        if scenario_abbrev: auto_filled.append(f'Abbrev: {scenario_abbrev}')
+        if date_run: auto_filled.append(f'Date: {date_run}')
+        if person_name: auto_filled.append(f'By: {person_name}')
+        if comment: auto_filled.append(f'Comment: {comment}')
+        auto_msg = f' | Auto-filled: {", ".join(auto_filled)}' if auto_filled else ''
+        
+        flash(f'Successfully uploaded scenario "{parsed["scenario_name"]}" with {len(parsed["input_files"])} input files{auto_msg}', 'success')
         invalidate_cache()
         
     except Exception as e:
