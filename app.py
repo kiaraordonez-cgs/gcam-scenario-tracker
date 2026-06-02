@@ -233,16 +233,38 @@ def get_cached_data():
     if _cache['data'] and (now - _cache['timestamp']) < CACHE_TTL:
         return _cache['data']
     
+    scenarios = []
+    junctions = []
+    inputs = []
+    
     try:
+        print("Loading scenarios...")
         scenarios = scenarios_sheet.get_all_records()
+        print(f"  Loaded {len(scenarios)} scenarios")
+    except Exception as e:
+        print(f"  ERROR loading scenarios: {e}")
+    
+    try:
+        print("Loading junctions...")
         junctions = junction_sheet.get_all_records()
+        print(f"  Loaded {len(junctions)} junctions")
+    except Exception as e:
+        print(f"  ERROR loading junctions: {e}")
+    
+    try:
+        print("Loading input files...")
         inputs = inputs_sheet.get_all_records()
+        print(f"  Loaded {len(inputs)} input files")
+    except Exception as e:
+        print(f"  ERROR loading inputs: {e}")
+    
+    if scenarios or inputs:
         _cache['data'] = {'scenarios': scenarios, 'junctions': junctions, 'inputs': inputs}
         _cache['timestamp'] = now
         return _cache['data']
-    except Exception as e:
-        print(f"Error fetching data: {e}")
-        return None
+    
+    print("ERROR: No data loaded at all")
+    return None
 
 def invalidate_cache():
     """Clear cache after writes"""
@@ -570,6 +592,27 @@ def api_mappings():
         'filename_pattern': 'configuration_PROJECT_scenarioAbbrev_YYMMDD-FL_comment.xml',
         'example': 'configuration_USAI_HA1_250206-KO_GDPPOPhigh.xml'
     })
+
+@app.route('/api/health')
+def api_health():
+    """Diagnostic endpoint - check what's working and what's not"""
+    import time
+    results = {'sheets_available': sheets_available()}
+    
+    if not sheets_available():
+        return jsonify(results)
+    
+    for name, sheet in [('Scenarios', scenarios_sheet), ('InputFiles', inputs_sheet), ('ScenarioInputs', junction_sheet)]:
+        start = time.time()
+        try:
+            rows = sheet.get_all_records()
+            elapsed = round(time.time() - start, 2)
+            results[name] = {'status': 'ok', 'rows': len(rows), 'seconds': elapsed}
+        except Exception as e:
+            elapsed = round(time.time() - start, 2)
+            results[name] = {'status': 'error', 'error': str(e), 'seconds': elapsed}
+    
+    return jsonify(results)
 
 @app.route('/api/data')
 def api_data():
