@@ -258,13 +258,9 @@ def get_cached_data():
     except Exception as e:
         print(f"  ERROR loading inputs: {e}")
     
-    if scenarios or inputs:
-        _cache['data'] = {'scenarios': scenarios, 'junctions': junctions, 'inputs': inputs}
-        _cache['timestamp'] = now
-        return _cache['data']
-    
-    print("ERROR: No data loaded at all")
-    return None
+    _cache['data'] = {'scenarios': scenarios, 'junctions': junctions, 'inputs': inputs}
+    _cache['timestamp'] = now
+    return _cache['data']
 
 def invalidate_cache():
     """Clear cache after writes"""
