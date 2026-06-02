@@ -664,7 +664,6 @@ def upload_config():
         date_run = meta.get('date_run', '')
         comment = meta.get('comment', '')
         person_name = meta.get('person_name', '')
-        description = f'Run by {person_name}' if person_name else ''
         
         scenarios_sheet.append_row([
             scenario_id,
@@ -672,7 +671,7 @@ def upload_config():
             scenario_abbrev,  # personal_scenario_name / Other Name
             project_name,  # project_name
             date_run,  # date_run
-            description,  # description
+            '',  # description
             '',  # zaratan_link
             comment,  # additional_notes
             uploaded_by,
@@ -683,7 +682,8 @@ def upload_config():
             '',  # submitted (col 14)
             '',  # finished (col 15)
             '',  # job_id (col 16)
-            ''   # duration (col 17)
+            '',  # duration (col 17)
+            person_name  # person (col 18)
         ])
         
         # Process input files in batch to avoid rate limits
@@ -871,6 +871,8 @@ def update_scenario(scenario_id):
             except: pass
         if 'job_id' in data:
             scenarios_sheet.update_cell(row, 16, data['job_id'])
+        if 'person' in data:
+            scenarios_sheet.update_cell(row, 18, data['person'])
         
         invalidate_cache()
         return jsonify({'status': 'success'})
@@ -1103,7 +1105,7 @@ def add_zaratan_columns():
         return jsonify({'error': 'Sheets not available'}), 503
     try:
         headers = scenarios_sheet.row_values(1)
-        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration']
+        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person']
         added = []
         for col in new_cols:
             if col not in headers:
