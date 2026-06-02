@@ -103,11 +103,17 @@ function esc(val) {
     return d.innerHTML;
 }
 
-function loadData() {
+function loadData(retries) {
+    if (retries === undefined) retries = 3;
     fetch('/api/data')
         .then(r => r.json())
         .then(data => {
             if (data.error) {
+                if (retries > 0) {
+                    console.log('Data load error, retrying in 3s...', retries, 'left');
+                    setTimeout(() => loadData(retries - 1), 3000);
+                    return;
+                }
                 document.getElementById('scenarios-tbody').innerHTML =
                     '<tr><td colspan="16" style="text-align:center;padding:40px;color:#991b1b;">Error loading data. Please refresh.</td></tr>';
                 return;
@@ -122,6 +128,11 @@ function loadData() {
         })
         .catch(err => {
             console.error('Load error:', err);
+            if (retries > 0) {
+                console.log('Retrying in 3s...', retries, 'left');
+                setTimeout(() => loadData(retries - 1), 3000);
+                return;
+            }
             document.getElementById('scenarios-tbody').innerHTML =
                 '<tr><td colspan="16" style="text-align:center;padding:40px;color:#991b1b;">Connection error. Please refresh.</td></tr>';
         });

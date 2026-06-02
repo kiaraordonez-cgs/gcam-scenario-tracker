@@ -1434,12 +1434,11 @@ def compare_scenarios():
 
 @app.route('/delete_scenario/<scenario_id>', methods=['POST'])
 def delete_scenario(scenario_id):
-    """Delete a scenario and ALL its junction records"""
+    """Delete a scenario. Orphaned junctions are filtered out by api_data."""
     try:
         if not sheets_available():
             return jsonify({'success': False, 'error': 'Sheets unavailable'})
         
-        # Find scenario row
         scenario_row = find_row_by_value(scenarios_sheet, 'id', scenario_id)
         
         if not scenario_row:
@@ -1449,55 +1448,22 @@ def delete_scenario(scenario_id):
         scenario_data = scenarios_sheet.row_values(scenario_row)
         config_file_id = scenario_data[10] if len(scenario_data) > 10 else None
         
-        # Delete from FileStorage if config exists
+        # Delete config from FileStorage
         if config_file_id:
             try:
                 file_row = find_row_by_value(file_storage_sheet, 'file_id', config_file_id)
                 if file_row:
                     file_storage_sheet.delete_rows(file_row)
-                    print(f"Deleted file {config_file_id} from storage")
             except Exception as e:
                 print(f"Error deleting file from storage: {e}")
         
-        # Delete scenario row
+        # Delete scenario row (just this one row - instant)
         scenarios_sheet.delete_rows(scenario_row)
-        print(f"Deleted scenario row {scenario_row}")
+        print(f"Deleted scenario {scenario_id}")
         
-        # Delete ALL junction records for this scenario
-        import time
-        try:
-            all_junctions = junction_sheet.get_all_records()
-            rows_to_delete = []
-            
-            for idx, record in enumerate(all_junctions, start=2):
-                if str(record.get('scenario_id')) == str(scenario_id):
-                    rows_to_delete.append(idx)
-            
-            # Delete ALL in reverse order, with rate limit pauses
-            deleted_count = 0
-            for row_num in reversed(rows_to_delete):
-                try:
-                    junction_sheet.delete_rows(row_num)
-                    deleted_count += 1
-                    if deleted_count % 40 == 0:
-                        print(f"Deleted {deleted_count}/{len(rows_to_delete)} junctions, pausing...")
-                        time.sleep(62)
-                except Exception as e:
-                    if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
-                        print(f"Rate limited at {deleted_count}, pausing 65s...")
-                        time.sleep(65)
-                        try:
-                            junction_sheet.delete_rows(row_num)
-                            deleted_count += 1
-                        except:
-                            pass
-                    else:
-                        print(f"Error deleting junction row {row_num}: {e}")
-            
-            print(f"Deleted {deleted_count}/{len(rows_to_delete)} junction records")
-                
-        except Exception as e:
-            print(f"Error deleting junctions: {e}")
+        # Junction records are NOT deleted here.
+        # api_data already filters them out by checking valid scenario IDs,
+        # so orphaned junctions are invisible and harmless.
         
         invalidate_cache()
         return jsonify({'success': True})
