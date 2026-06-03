@@ -1103,40 +1103,84 @@ def test_compare():
 
 @app.route('/cleanup_orphaned_junctions')
 def cleanup_orphaned_junctions():
-    """Remove junction records that reference deleted scenarios"""
+    """Sweep out ALL orphaned data: junctions pointing to deleted scenarios,
+    and input files no longer referenced by any surviving scenario.
+    
+    Uses fast read-filter-rewrite (no per-row deletes, no rate limits).
+    Safe to run anytime.
+    """
     if not sheets_available():
         return jsonify({'error': 'Sheets not available'}), 503
     try:
-        import time
+        # Valid scenario IDs (the ones that still exist)
         scenarios = scenarios_sheet.get_all_records()
-        valid_scenario_ids = set(str(s['id']) for s in scenarios)
+        valid_scenario_ids = set(str(s.get('id', '')).strip() for s in scenarios)
         
-        all_junctions = junction_sheet.get_all_records()
-        orphaned_rows = []
-        
-        for idx, j in enumerate(all_junctions, start=2):
-            if str(j.get('scenario_id', '')) not in valid_scenario_ids:
-                orphaned_rows.append(idx)
-        
-        deleted = 0
-        for row_num in reversed(orphaned_rows):
+        # --- Clean junctions ---
+        junction_values = junction_sheet.get_all_values()
+        junctions_removed = 0
+        still_used_input_ids = set()
+        if junction_values:
+            j_header = junction_values[0]
+            j_data = junction_values[1:]
             try:
-                junction_sheet.delete_rows(row_num)
-                deleted += 1
-                if deleted % 40 == 0:
-                    time.sleep(62)
-            except Exception as e:
-                if '429' in str(e):
-                    time.sleep(65)
-                    try:
-                        junction_sheet.delete_rows(row_num)
-                        deleted += 1
-                    except:
-                        pass
+                sid_idx = j_header.index('scenario_id')
+                iid_idx = j_header.index('input_file_id')
+            except ValueError:
+                sid_idx, iid_idx = 0, 1
+            
+            surviving_junctions = []
+            for row in j_data:
+                if len(row) <= max(sid_idx, iid_idx):
+                    continue
+                if str(row[sid_idx]).strip() in valid_scenario_ids:
+                    surviving_junctions.append(row)
+                    still_used_input_ids.add(str(row[iid_idx]).strip())
+                else:
+                    junctions_removed += 1
+            
+            if junctions_removed > 0:
+                junction_sheet.clear()
+                junction_sheet.append_row(j_header)
+                if surviving_junctions:
+                    junction_sheet.append_rows(surviving_junctions)
+        
+        # --- Clean orphaned input files (not referenced by any surviving junction) ---
+        input_values = inputs_sheet.get_all_values()
+        inputs_removed = 0
+        if input_values:
+            i_header = input_values[0]
+            i_data = input_values[1:]
+            try:
+                id_idx = i_header.index('id')
+            except ValueError:
+                id_idx = 0
+            
+            surviving_inputs = []
+            for row in i_data:
+                if len(row) <= id_idx:
+                    continue
+                if str(row[id_idx]).strip() in still_used_input_ids:
+                    surviving_inputs.append(row)
+                else:
+                    inputs_removed += 1
+            
+            if inputs_removed > 0:
+                inputs_sheet.clear()
+                inputs_sheet.append_row(i_header)
+                if surviving_inputs:
+                    inputs_sheet.append_rows(surviving_inputs)
         
         invalidate_cache()
-        return jsonify({'status': 'success', 'orphaned_found': len(orphaned_rows), 'deleted': deleted})
+        return jsonify({
+            'status': 'success',
+            'orphaned_junctions_removed': junctions_removed,
+            'orphaned_input_files_removed': inputs_removed,
+            'valid_scenarios': len(valid_scenario_ids)
+        })
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 @app.route('/add_zaratan_columns')
