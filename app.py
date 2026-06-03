@@ -665,7 +665,7 @@ def upload_config():
         return redirect(url_for('index'))
     
     file = request.files['config_file']
-    uploaded_by = request.form.get('uploaded_by', '')  # Empty by default
+    uploaded_by = 'Website'  # Fixed - website uploads are always "Website"
     
     if file.filename == '':
         flash('No file selected', 'error')
@@ -710,9 +710,9 @@ def upload_config():
             scenario_abbrev,  # personal_scenario_name / Other Name
             project_name,  # project_name
             date_run,  # date_run
-            '',  # description
+            comment,  # description (filename comment goes here now)
             '',  # zaratan_link
-            comment,  # additional_notes
+            '',  # additional_notes -> now "Error notes", empty on upload
             uploaded_by,
             upload_date,
             file_id,
@@ -722,7 +722,8 @@ def upload_config():
             '',  # finished (col 15)
             '',  # job_id (col 16)
             '',  # duration (col 17)
-            person_name  # person (col 18)
+            person_name,  # person (col 18)
+            ''   # based_on (col 19)
         ])
         
         # Process input files in batch to avoid rate limits
@@ -785,7 +786,7 @@ def upload_config():
         if scenario_abbrev: auto_filled.append(f'Abbrev: {scenario_abbrev}')
         if date_run: auto_filled.append(f'Date: {date_run}')
         if person_name: auto_filled.append(f'By: {person_name}')
-        if comment: auto_filled.append(f'Comment: {comment}')
+        if comment: auto_filled.append(f'Description: {comment}')
         auto_msg = f' | Auto-filled: {", ".join(auto_filled)}' if auto_filled else ''
         
         flash(f'Successfully uploaded scenario "{parsed["scenario_name"]}" with {len(parsed["input_files"])} input files{auto_msg}', 'success')
@@ -883,8 +884,7 @@ def update_scenario(scenario_id):
             scenarios_sheet.update_cell(row, 7, data['zaratan_link'])
         if 'additional_notes' in data:
             scenarios_sheet.update_cell(row, 8, data['additional_notes'])
-        if 'uploaded_by' in data:
-            scenarios_sheet.update_cell(row, 9, data['uploaded_by'])
+        # uploaded_by (col 9) is fixed - not editable
         # New Zaratan columns (13-17)
         if 'errors' in data:
             scenarios_sheet.update_cell(row, 13, data['errors'])
@@ -912,6 +912,8 @@ def update_scenario(scenario_id):
             scenarios_sheet.update_cell(row, 16, data['job_id'])
         if 'person' in data:
             scenarios_sheet.update_cell(row, 18, data['person'])
+        if 'based_on' in data:
+            scenarios_sheet.update_cell(row, 19, data['based_on'])
         
         invalidate_cache()
         return jsonify({'status': 'success'})
@@ -1144,7 +1146,7 @@ def add_zaratan_columns():
         return jsonify({'error': 'Sheets not available'}), 503
     try:
         headers = scenarios_sheet.row_values(1)
-        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person']
+        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person', 'based_on']
         added = []
         for col in new_cols:
             if col not in headers:
@@ -1473,42 +1475,101 @@ def compare_scenarios():
 
 @app.route('/delete_scenario/<scenario_id>', methods=['POST'])
 def delete_scenario(scenario_id):
-    """Delete a scenario. Orphaned junctions are filtered out by api_data."""
+    """Delete a scenario, its junctions, and any input files left orphaned.
+    
+    Uses a read-filter-rewrite approach (clear + rewrite) instead of deleting
+    rows one by one, so it stays fast and avoids Google's write rate limits.
+    Input files still used by OTHER scenarios are preserved.
+    """
     try:
         if not sheets_available():
             return jsonify({'success': False, 'error': 'Sheets unavailable'})
         
         scenario_row = find_row_by_value(scenarios_sheet, 'id', scenario_id)
-        
         if not scenario_row:
             return jsonify({'success': False, 'error': 'Scenario not found'})
         
-        # Get config_file_id before deleting
+        sid = str(scenario_id).strip()
+        
+        # 1. Delete config file from FileStorage
         scenario_data = scenarios_sheet.row_values(scenario_row)
         config_file_id = scenario_data[10] if len(scenario_data) > 10 else None
-        
-        # Delete config from FileStorage
         if config_file_id:
             try:
                 file_row = find_row_by_value(file_storage_sheet, 'file_id', config_file_id)
                 if file_row:
                     file_storage_sheet.delete_rows(file_row)
             except Exception as e:
-                print(f"Error deleting file from storage: {e}")
+                print(f"Error deleting config from storage: {e}")
         
-        # Delete scenario row (just this one row - instant)
+        # 2. Delete the scenario row
         scenarios_sheet.delete_rows(scenario_row)
-        print(f"Deleted scenario {scenario_id}")
+        print(f"Deleted scenario {sid}")
         
-        # Junction records are NOT deleted here.
-        # api_data already filters them out by checking valid scenario IDs,
-        # so orphaned junctions are invisible and harmless.
+        # 3. Process junctions: figure out which input files this scenario used,
+        #    which junctions survive, and which input files become orphaned.
+        junction_values = junction_sheet.get_all_values()
+        orphaned_input_ids = set()
+        if junction_values:
+            j_header = junction_values[0]
+            j_data = junction_values[1:]
+            try:
+                sid_idx = j_header.index('scenario_id')
+                iid_idx = j_header.index('input_file_id')
+            except ValueError:
+                sid_idx, iid_idx = 0, 1  # fallback to known order
+            
+            this_scenario_inputs = set()
+            surviving_junctions = []
+            for row in j_data:
+                if len(row) <= max(sid_idx, iid_idx):
+                    continue
+                row_sid = str(row[sid_idx]).strip()
+                row_iid = str(row[iid_idx]).strip()
+                if row_sid == sid:
+                    this_scenario_inputs.add(row_iid)
+                else:
+                    surviving_junctions.append(row)
+            
+            # Which of this scenario's input files are still used by others?
+            still_used = set(str(r[iid_idx]).strip() for r in surviving_junctions if len(r) > iid_idx)
+            orphaned_input_ids = this_scenario_inputs - still_used
+            
+            # Rewrite junction sheet without this scenario's junctions
+            junction_sheet.clear()
+            junction_sheet.append_row(j_header)
+            if surviving_junctions:
+                junction_sheet.append_rows(surviving_junctions)
+            print(f"Junctions: removed {len(this_scenario_inputs)} links, {len(surviving_junctions)} remain")
+        
+        # 4. Delete orphaned input files (used only by this scenario)
+        if orphaned_input_ids:
+            input_values = inputs_sheet.get_all_values()
+            if input_values:
+                i_header = input_values[0]
+                i_data = input_values[1:]
+                try:
+                    id_idx = i_header.index('id')
+                except ValueError:
+                    id_idx = 0
+                
+                surviving_inputs = [
+                    row for row in i_data
+                    if len(row) > id_idx and str(row[id_idx]).strip() not in orphaned_input_ids
+                ]
+                
+                inputs_sheet.clear()
+                inputs_sheet.append_row(i_header)
+                if surviving_inputs:
+                    inputs_sheet.append_rows(surviving_inputs)
+                print(f"Input files: deleted {len(orphaned_input_ids)} orphaned, {len(surviving_inputs)} remain")
         
         invalidate_cache()
         return jsonify({'success': True})
         
     except Exception as e:
-        print(f"Error deleting scenario: {e}")
+        import traceback
+        print(f"Error deleting scenario: {traceback.format_exc()}")
         invalidate_cache()
         return jsonify({'success': False, 'error': str(e)})
 
