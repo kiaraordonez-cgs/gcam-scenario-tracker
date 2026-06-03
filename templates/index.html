@@ -5,14 +5,14 @@
     <div class="action-bar">
         <div class="action-buttons">
             <form action="{{ url_for('upload_config') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
-                <input type="hidden" name="uploaded_by" value="Manual">
+                <input type="hidden" name="uploaded_by" value="Website">
                 <label class="btn-upload">
                     📤 Upload Configuration
                     <input type="file" name="config_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
                 </label>
             </form>
             <form action="{{ url_for('upload_input') }}" method="POST" enctype="multipart/form-data" style="display: inline-block;">
-                <input type="hidden" name="uploaded_by" value="Manual">
+                <input type="hidden" name="uploaded_by" value="Website">
                 <label class="btn-upload">
                     📤 Upload Input File
                     <input type="file" name="input_file" accept=".xml" required onchange="this.form.submit()" style="display: none;">
@@ -45,21 +45,22 @@
                     <th class="sortable">Scenario Name</th>
                     <th class="sortable">Other Name</th>
                     <th class="sortable">Project</th>
-                    <th class="sortable">Person</th>
+                    <th class="sortable">Based on</th>
+                    <th class="sortable">Run by</th>
+                    <th class="sortable">Description</th>
                     <th class="sortable">Submitted</th>
                     <th class="sortable">Finished</th>
                     <th class="sortable">Errors</th>
-                    <th class="sortable">Description</th>
-                    <th class="sortable">Zaratan Link</th>
-                    <th class="sortable">Job ID</th>
-                    <th class="sortable">Notes</th>
-                    <th class="sortable">Uploaded By</th>
+                    <th class="sortable">Error notes</th>
+                    <th class="sortable">Uploaded through</th>
                     <th class="sortable">Upload Date</th>
+                    <th class="sortable">Job ID</th>
+                    <th class="sortable">Zaratan Link</th>
                     <th class="sortable">Input Files</th>
                     <th>Actions</th>
                 </tr></thead>
                 <tbody id="scenarios-tbody">
-                    <tr><td colspan="16" style="text-align:center;padding:40px;color:#6b7280;">Loading scenarios...</td></tr>
+                    <tr><td colspan="17" style="text-align:center;padding:40px;color:#6b7280;">Loading scenarios...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -115,7 +116,7 @@ function loadData(retries) {
                     return;
                 }
                 document.getElementById('scenarios-tbody').innerHTML =
-                    '<tr><td colspan="16" style="text-align:center;padding:40px;color:#991b1b;">Error loading data. Please refresh.</td></tr>';
+                    '<tr><td colspan="17" style="text-align:center;padding:40px;color:#991b1b;">Error loading data. Please refresh.</td></tr>';
                 return;
             }
             renderScenarios(data.scenarios, data.projects);
@@ -134,7 +135,7 @@ function loadData(retries) {
                 return;
             }
             document.getElementById('scenarios-tbody').innerHTML =
-                '<tr><td colspan="16" style="text-align:center;padding:40px;color:#991b1b;">Connection error. Please refresh.</td></tr>';
+                '<tr><td colspan="17" style="text-align:center;padding:40px;color:#991b1b;">Connection error. Please refresh.</td></tr>';
         });
 }
 
@@ -145,13 +146,18 @@ function renderScenarios(scenarios, projects) {
 
     const tbody = document.getElementById('scenarios-tbody');
     if (!scenarios.length) {
-        tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:40px;color:#6b7280;">No scenarios yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;padding:40px;color:#6b7280;">No scenarios yet.</td></tr>';
         return;
     }
+    // Build list of all scenario names for the "Based on" dropdown
+    const allNames = scenarios.map(x => x.scenario_name).filter(n => n);
+    
     tbody.innerHTML = scenarios.map(s => {
         const ud = s.upload_date ? String(s.upload_date).substring(0,10) : '';
         const ub = s.uploaded_by || '';
-        const isManual = (ub === 'Manual' || ub === 'User' || !ub);
+        // "Uploaded through" is fixed: legacy Manual/User -> Website
+        const uploadedThrough = (ub === 'Zaratan') ? 'Zaratan' : 'Website';
+        const basedOn = s.based_on || '';
         return `<tr data-id="${esc(s.id)}" data-project="${esc(s.project_name||'')}">
             <td><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
             <td><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
@@ -161,19 +167,20 @@ function renderScenarios(scenarios, projects) {
                 ${projects.map(p=>`<option value="${esc(p)}" ${s.project_name===p?'selected':''}>${esc(p)}</option>`).join('')}
                 <option value="__new__">+ Add New</option>
             </select></td>
+            <td><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','based_on',this.value)">
+                <option value="">Select...</option>
+                ${allNames.filter(n=>n!==s.scenario_name).map(n=>`<option value="${esc(n)}" ${basedOn===n?'selected':''}>${esc(n)}</option>`).join('')}
+            </select></td>
             <td class="editable" data-field="person">${esc(s.person||'')}</td>
+            <td class="editable" data-field="description">${esc(s.description||'')}</td>
             <td class="editable" data-field="submitted">${esc(s.submitted||'')}</td>
             <td class="editable" data-field="finished">${esc(s.finished||'')}</td>
             <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateScenario('${esc(s.id)}','errors',this.checked?'Yes':'')"></td>
-            <td class="editable" data-field="description">${esc(s.description||'')}</td>
-            <td class="editable" data-field="zaratan_link">${esc(s.zaratan_link||'')}</td>
-            <td class="editable" data-field="job_id">${esc(s.job_id||'')}</td>
             <td class="editable" data-field="additional_notes">${esc(s.additional_notes||'')}</td>
-            <td><select class="inline-edit inline-edit-sm" onchange="updateScenario('${esc(s.id)}','uploaded_by',this.value)">
-                <option value="Manual" ${isManual?'selected':''}>Manual</option>
-                <option value="Zaratan" ${ub==='Zaratan'?'selected':''}>Zaratan</option>
-            </select></td>
+            <td>${esc(uploadedThrough)}</td>
             <td>${esc(ud)}</td>
+            <td class="editable" data-field="job_id">${esc(s.job_id||'')}</td>
+            <td class="editable" data-field="zaratan_link">${esc(s.zaratan_link||'')}</td>
             <td><span class="badge">${s.input_count||0}</span></td>
             <td>
                 <a href="/download/config/${esc(s.id)}" class="btn-small">Download</a>
