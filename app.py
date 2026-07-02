@@ -16,6 +16,13 @@ from lxml import etree
 import gspread
 from google.oauth2.service_account import Credentials
 
+# Load variables from a local .env file for development.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -136,6 +143,20 @@ GOOGLE_DRIVE_FOLDER_ID = '1RY61HJn1nWGsOlbjBE1lnbsEIH16TTfR'
 
 ALLOWED_EXTENSIONS = {'xml'}
 
+# Zaratan log ingestion
+# Optional shared secret. If INGEST_TOKEN is set in the environment, requests to
+# /ingest_logs must send it as ?token=... or the X-Ingest-Token header.
+INGEST_TOKEN = os.environ.get('INGEST_TOKEN', '')
+
+# Column order for the ZaratanLogs worksheet (raw log storage).
+ZARATAN_LOG_COLUMNS = [
+    'job_id', 'restart_count', 'event', 'scenario_name', 'project_name', 'user',
+    'hostname', 'started_at', 'config_file', 'gcam_finished_at', 'gcam_exit_code',
+    'script_finished_at', 'script_exit_code', 'sacct_submit', 'sacct_start',
+    'sacct_end', 'sacct_elapsed', 'sacct_state', 'sacct_exit_code',
+    'received_at', 'raw_json'
+]
+
 # =============================================================================
 # Google API Setup
 # =============================================================================
@@ -203,7 +224,15 @@ try:
         # Create if doesn't exist
         file_storage_sheet = sheet.add_worksheet(title='FileStorage', rows=1000, cols=3)
         file_storage_sheet.append_row(['file_id', 'filename', 'content'])
-    
+
+    # ZaratanLogs sheet for storing raw run logs sent from the cluster
+    try:
+        zaratan_logs_sheet = sheet.worksheet('ZaratanLogs')
+    except:
+        # Create if doesn't exist
+        zaratan_logs_sheet = sheet.add_worksheet(title='ZaratanLogs', rows=1000, cols=len(ZARATAN_LOG_COLUMNS))
+        zaratan_logs_sheet.append_row(ZARATAN_LOG_COLUMNS)
+
     print("✓ Google Sheets connection successful")
 except Exception as e:
     print(f"✗ Error initializing Google APIs: {e}")
@@ -213,6 +242,7 @@ except Exception as e:
     inputs_sheet = None
     junction_sheet = None
     file_storage_sheet = None
+    zaratan_logs_sheet = None
 
 # =============================================================================
 # Helper Functions - Google Sheets
@@ -1616,6 +1646,102 @@ def delete_scenario(scenario_id):
         print(f"Error deleting scenario: {traceback.format_exc()}")
         invalidate_cache()
         return jsonify({'success': False, 'error': str(e)})
+
+# =============================================================================
+# Zaratan Log Ingestion
+# =============================================================================
+def zaratan_log_to_row(record):
+    """Flatten a single Zaratan log record (started or finished) into a row
+    matching ZARATAN_LOG_COLUMNS. Missing fields become empty strings and the
+    full original record is preserved in raw_json."""
+    sacct = record.get('sacct') or {}
+    values = {
+        'job_id': record.get('job_id', ''),
+        'restart_count': record.get('restart_count', ''),
+        'event': record.get('event', ''),
+        'scenario_name': record.get('scenario_name', ''),
+        'project_name': record.get('project_name', ''),
+        'user': record.get('user', ''),
+        'hostname': record.get('hostname', ''),
+        'started_at': record.get('started_at', ''),
+        'config_file': record.get('config_file', ''),
+        'gcam_finished_at': record.get('gcam_finished_at', ''),
+        'gcam_exit_code': record.get('gcam_exit_code', ''),
+        'script_finished_at': record.get('script_finished_at', ''),
+        'script_exit_code': record.get('script_exit_code', ''),
+        'sacct_submit': sacct.get('submit', ''),
+        'sacct_start': sacct.get('start', ''),
+        'sacct_end': sacct.get('end', ''),
+        'sacct_elapsed': sacct.get('elapsed', ''),
+        'sacct_state': sacct.get('state', ''),
+        'sacct_exit_code': sacct.get('exit_code', ''),
+        'received_at': datetime.now().isoformat(),
+        'raw_json': json.dumps(record, ensure_ascii=False),
+    }
+    return [values[col] for col in ZARATAN_LOG_COLUMNS]
+
+def zaratan_log_key(job_id, restart_count, event):
+    """Natural unique key for a log record: one started/finished event per job
+    attempt. Normalized to strings so values from the sheet (always strings)
+    compare equal to values from JSON (job_id str, restart_count int)."""
+    return (str(job_id).strip(), str(restart_count).strip(), str(event).strip())
+
+@app.route('/ingest_logs', methods=['POST'])
+def ingest_logs():
+    """Receive Zaratan run logs and append them to the ZaratanLogs worksheet.
+
+    Accepts either a single JSON object or a JSON list of objects (a batch).
+    Protected by INGEST_TOKEN when that env var is set (via ?token= or the
+    X-Ingest-Token header).
+
+    Records already present (same job_id+restart_count+event) are skipped, so
+    re-sending a batch never creates duplicate rows. Returns
+    {"received": N, "skipped": M} on success; the sender can safely delete all
+    files in the batch after any 200 response.
+    """
+    # Auth (only enforced if a token is configured)
+    if INGEST_TOKEN:
+        provided = request.headers.get('X-Ingest-Token') or request.args.get('token', '')
+        if provided != INGEST_TOKEN:
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+    if zaratan_logs_sheet is None:
+        return jsonify({'status': 'error', 'message': 'Sheets unavailable'}), 503
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return jsonify({'status': 'error', 'message': 'Invalid or missing JSON body'}), 400
+
+    records = payload if isinstance(payload, list) else [payload]
+    if not records:
+        return jsonify({'status': 'ok', 'received': 0, 'skipped': 0})
+
+    try:
+        # Build the set of keys already stored so re-sent batches don't create
+        # duplicate rows. job_id/restart_count/event are the first 3 columns.
+        existing = zaratan_logs_sheet.get_all_values()
+        seen = set()
+        for row in existing[1:]:  # skip header
+            if len(row) >= 3:
+                seen.add(zaratan_log_key(row[0], row[1], row[2]))
+
+        rows = []
+        skipped = 0
+        for r in records:
+            if not isinstance(r, dict):
+                continue
+            key = zaratan_log_key(r.get('job_id', ''), r.get('restart_count', ''), r.get('event', ''))
+            if key in seen:  # already in the sheet, or a duplicate within this batch
+                skipped += 1
+                continue
+            seen.add(key)
+            rows.append(zaratan_log_to_row(r))
+
+        if rows:
+            zaratan_logs_sheet.append_rows(rows)
+        return jsonify({'status': 'ok', 'received': len(rows), 'skipped': skipped})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # =============================================================================
 # Main
