@@ -151,10 +151,10 @@ INGEST_TOKEN = os.environ.get('INGEST_TOKEN', '')
 # Column order for the ZaratanLogs worksheet (raw log storage).
 ZARATAN_LOG_COLUMNS = [
     'job_id', 'restart_count', 'event', 'scenario_name', 'project_name', 'user',
-    'hostname', 'started_at', 'config_file', 'gcam_finished_at', 'gcam_exit_code',
-    'script_finished_at', 'script_exit_code', 'sacct_submit', 'sacct_start',
-    'sacct_end', 'sacct_elapsed', 'sacct_state', 'sacct_exit_code',
-    'received_at', 'raw_json'
+    'hostname', 'started_at', 'config_file', 'gcam_dir', 'gcamreport_template_version',
+    'gcam_finished_at', 'gcam_exit_code', 'script_finished_at', 'script_exit_code',
+    'sacct_submit', 'sacct_start', 'sacct_end', 'sacct_elapsed', 'sacct_state',
+    'sacct_exit_code', 'received_at', 'raw_json'
 ]
 
 # =============================================================================
@@ -1665,6 +1665,8 @@ def zaratan_log_to_row(record):
         'hostname': record.get('hostname', ''),
         'started_at': record.get('started_at', ''),
         'config_file': record.get('config_file', ''),
+        'gcam_dir': record.get('gcam_dir', ''),
+        'gcamreport_template_version': record.get('gcamreport_template_version', ''),
         'gcam_finished_at': record.get('gcam_finished_at', ''),
         'gcam_exit_code': record.get('gcam_exit_code', ''),
         'script_finished_at': record.get('script_finished_at', ''),
