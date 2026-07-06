@@ -1688,6 +1688,145 @@ def zaratan_log_key(job_id, restart_count, event):
     compare equal to values from JSON (job_id str, restart_count int)."""
     return (str(job_id).strip(), str(restart_count).strip(), str(event).strip())
 
+def _log_date_run(record):
+    """YYYY-MM-DD the run actually ran, from started_at (or sacct.start)."""
+    ts = record.get('started_at') or (record.get('sacct') or {}).get('start') or ''
+    ts = str(ts)
+    return ts[:10] if len(ts) >= 10 and ts[:4].isdigit() else ''
+
+def _log_finished(record):
+    """Authoritative finish time: sacct.end unless it's still Unknown, in which
+    case fall back to the script-written gcam_finished_at."""
+    end = str((record.get('sacct') or {}).get('end', '')).strip()
+    if end and end.lower() != 'unknown':
+        return end
+    return str(record.get('gcam_finished_at', '') or '')
+
+def _log_errors(record):
+    """Whether this run errored, as a Yes/No flag to match the webapp's current
+    'errors' checkbox (truthy = checked). A run errors if SLURM ended in a
+    non-success state or GCAM returned a non-zero exit code.
+
+    The detailed reason is preserved (commented out below) for when we want to
+    surface it, e.g. routed into the "Error notes" column. The full detail always
+    lives in ZaratanLogs regardless.
+    """
+    sacct = record.get('sacct') or {}
+    state = str(sacct.get('state', '')).strip()
+    gcam_ec = str(record.get('gcam_exit_code', '')).strip()
+
+    # --- Detailed reason (kept for later use) ---
+    # problems = []
+    # if state and state.upper() not in ('COMPLETED', 'RUNNING'):
+    #     problems.append(state)
+    # if gcam_ec and gcam_ec not in ('0', ''):
+    #     problems.append(f'gcam_exit={gcam_ec}')
+    # return '; '.join(problems)
+
+    bad_state = state.upper() not in ('', 'COMPLETED', 'RUNNING', 'PENDING')
+    bad_exit = gcam_ec not in ('', '0')
+    return 'Yes' if (bad_state or bad_exit) else ''
+
+def scenario_fields_from_log(record):
+    """The Scenarios columns a single log record should set (empty values omitted
+    so they never overwrite existing data). started supplies identity + date_run;
+    finished supplies submitted/finished/duration/errors."""
+    f = {}
+    if record.get('scenario_name'):
+        f['scenario_name'] = record['scenario_name']
+    code = record.get('project_name')
+    if code:
+        f['project_name'] = PROJECT_MAP.get(code, code)
+    if record.get('job_id'):
+        f['job_id'] = str(record['job_id'])
+    if record.get('user'):
+        f['person'] = record['user']
+    date_run = _log_date_run(record)
+    if date_run:
+        f['date_run'] = date_run
+    sacct = record.get('sacct') or {}
+    if sacct or record.get('event') == 'finished':
+        if sacct.get('submit'):
+            f['submitted'] = sacct['submit']
+        finished = _log_finished(record)
+        if finished:
+            f['finished'] = finished
+        if sacct.get('elapsed'):
+            f['duration'] = sacct['elapsed']
+        errors = _log_errors(record)
+        if errors:
+            f['errors'] = errors
+    return f
+
+def apply_scenario_upserts(records):
+    """Reflect ingested log records into the Scenarios sheet, keyed by job_id.
+    'started' creates/populates the row; 'finished' updates the same row in place.
+    Restarts and finished-before-started are handled naturally by upserting on
+    job_id. Returns {'created': N, 'updated': M}. Reads the sheet once and writes
+    in batched calls to stay within API rate limits."""
+    if scenarios_sheet is None:
+        return {'created': 0, 'updated': 0}
+    from gspread.utils import rowcol_to_a1
+
+    values = scenarios_sheet.get_all_values()
+    if not values:
+        return {'created': 0, 'updated': 0}
+    header = values[0]
+    col = {name: i for i, name in enumerate(header)}
+    if 'job_id' not in col:
+        return {'created': 0, 'updated': 0}
+    jid_idx = col['job_id']
+
+    # Existing job_id -> sheet row number (1-indexed; data starts at row 2).
+    # Rows with an empty job_id (e.g. website config uploads) are ignored, so a
+    # log always gets its own row rather than attaching to an unrelated one.
+    existing_rownum = {}
+    for i, row in enumerate(values[1:], start=2):
+        if len(row) > jid_idx:
+            jid = str(row[jid_idx]).strip()
+            if jid:
+                existing_rownum[jid] = i
+
+    pending_new = {}      # job_id -> full row list (appended at the end)
+    updates = []          # (row_number, col_idx0, value) for existing rows
+
+    for rec in records:
+        jid = str(rec.get('job_id', '')).strip()
+        if not jid:
+            continue
+        fields = scenario_fields_from_log(rec)
+        if jid in existing_rownum:
+            rownum = existing_rownum[jid]
+            for name, val in fields.items():
+                if val != '' and name in col:
+                    updates.append((rownum, col[name], val))
+        elif jid in pending_new:
+            row = pending_new[jid]
+            for name, val in fields.items():
+                if val != '' and name in col:
+                    row[col[name]] = val
+        else:
+            row = [''] * len(header)
+            base = {
+                'id': str(uuid.uuid4())[:8],
+                # 'Zaratan' is the value the dashboard's "Uploaded through" column
+                # recognizes as the cluster channel (else it shows "Website").
+                'uploaded_by': 'Zaratan',
+                'upload_date': datetime.now().isoformat(),
+            }
+            for name, val in {**base, **fields}.items():
+                if val != '' and name in col:
+                    row[col[name]] = val
+            pending_new[jid] = row
+
+    if pending_new:
+        scenarios_sheet.append_rows(list(pending_new.values()))
+    if updates:
+        batch = [{'range': rowcol_to_a1(r, c + 1), 'values': [[v]]} for (r, c, v) in updates]
+        scenarios_sheet.batch_update(batch)
+
+    return {'created': len(pending_new), 'updated': len(set(u[0] for u in updates))}
+
 @app.route('/ingest_logs', methods=['POST'])
 def ingest_logs():
     """Receive Zaratan run logs and append them to the ZaratanLogs worksheet.
@@ -1697,9 +1836,11 @@ def ingest_logs():
     X-Ingest-Token header).
 
     Records already present (same job_id+restart_count+event) are skipped, so
-    re-sending a batch never creates duplicate rows. Returns
-    {"received": N, "skipped": M} on success; the sender can safely delete all
-    files in the batch after any 200 response.
+    re-sending a batch never creates duplicate rows. Newly-stored records are
+    also upserted into the Scenarios sheet by job_id (started creates the row,
+    finished updates it). Returns {"received": N, "skipped": M, "scenarios":
+    {...}} on success; the sender can safely delete all files in the batch after
+    any 200 response.
     """
     # Auth (only enforced if a token is configured)
     if INGEST_TOKEN:
@@ -1728,6 +1869,7 @@ def ingest_logs():
                 seen.add(zaratan_log_key(row[0], row[1], row[2]))
 
         rows = []
+        new_records = []
         skipped = 0
         for r in records:
             if not isinstance(r, dict):
@@ -1738,10 +1880,23 @@ def ingest_logs():
                 continue
             seen.add(key)
             rows.append(zaratan_log_to_row(r))
+            new_records.append(r)
 
         if rows:
             zaratan_logs_sheet.append_rows(rows)
-        return jsonify({'status': 'ok', 'received': len(rows), 'skipped': skipped})
+        scenarios = {'created': 0, 'updated': 0}
+        scenarios_error = None
+        try:
+            scenarios = apply_scenario_upserts(new_records)
+            invalidate_cache()
+        except Exception as se:
+            scenarios_error = str(se)
+
+        result = {'status': 'ok', 'received': len(rows), 'skipped': skipped,
+                  'scenarios': scenarios}
+        if scenarios_error:
+            result['scenarios_error'] = scenarios_error
+        return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
