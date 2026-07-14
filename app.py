@@ -1730,15 +1730,15 @@ def _log_errors(record):
     bad_exit = gcam_ec not in ('', '0')
     return 'Yes' if (bad_state or bad_exit) else ''
 
-def _log_person(scenario_name, user):
+def _log_person(meta, user):
     """Resolve the runner's full name for a logged run. Tries the -FL initials
-    embedded in scenario_name first (parse_scenario_filename -> PERSON_MAP), then
+    parsed from scenario_name (meta['person_name'] via PERSON_MAP) first, then
     falls back to the Zaratan username mapping (USERNAME_MAP). Returns '' if the
-    person can't be identified from either source."""
-    if scenario_name:
-        name = parse_scenario_filename(scenario_name).get('person_name', '')
-        if name:
-            return name
+    person can't be identified from either source. `meta` is the result of
+    parse_scenario_filename(scenario_name)."""
+    name = meta.get('person_name', '')
+    if name:
+        return name
     if user:
         return USERNAME_MAP.get(user, '')
     return ''
@@ -1748,8 +1748,10 @@ def scenario_fields_from_log(record):
     so they never overwrite existing data). started supplies identity + date_run;
     finished supplies submitted/finished/duration/errors."""
     f = {}
-    if record.get('scenario_name'):
-        f['scenario_name'] = record['scenario_name']
+    scenario_name = record.get('scenario_name', '')
+    meta = parse_scenario_filename(scenario_name) if scenario_name else {}
+    if scenario_name:
+        f['scenario_name'] = scenario_name
     code = record.get('project_name')
     if code:
         f['project_name'] = PROJECT_MAP.get(code, code)
@@ -1757,10 +1759,12 @@ def scenario_fields_from_log(record):
         f['job_id'] = str(record['job_id'])
     user = record.get('user', '')
     if user:
-        f['zaratan_username'] = user  
-    person = _log_person(record.get('scenario_name', ''), user)
+        f['zaratan_username'] = user 
+    person = _log_person(meta, user)
     if person:
         f['person'] = person  
+    if meta.get('comment'):
+        f['description'] = meta['comment']
     date_run = _log_date_run(record)
     if date_run:
         f['date_run'] = date_run
