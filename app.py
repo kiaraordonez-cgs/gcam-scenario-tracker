@@ -68,8 +68,11 @@ MAPPINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mapping
 PROJECT_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'projects.csv'), 'code', 'name')
 PERSON_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'people.csv'), 'initials', 'name')
 
+USERNAME_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'people.csv'), 'zaratan_username', 'name')
+
 print(f"Loaded {len(PROJECT_MAP)} project mappings: {PROJECT_MAP}")
 print(f"Loaded {len(PERSON_MAP)} person mappings: {PERSON_MAP}")
+print(f"Loaded {len(USERNAME_MAP)} zaratan username mappings: {USERNAME_MAP}")
 
 def parse_scenario_filename(filename):
     """Parse configuration filename to extract metadata.
@@ -1220,7 +1223,7 @@ def add_zaratan_columns():
         return jsonify({'error': 'Sheets not available'}), 503
     try:
         headers = scenarios_sheet.row_values(1)
-        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person', 'based_on']
+        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person', 'based_on', 'zaratan_username']
         added = []
         for col in new_cols:
             if col not in headers:
@@ -1727,6 +1730,19 @@ def _log_errors(record):
     bad_exit = gcam_ec not in ('', '0')
     return 'Yes' if (bad_state or bad_exit) else ''
 
+def _log_person(scenario_name, user):
+    """Resolve the runner's full name for a logged run. Tries the -FL initials
+    embedded in scenario_name first (parse_scenario_filename -> PERSON_MAP), then
+    falls back to the Zaratan username mapping (USERNAME_MAP). Returns '' if the
+    person can't be identified from either source."""
+    if scenario_name:
+        name = parse_scenario_filename(scenario_name).get('person_name', '')
+        if name:
+            return name
+    if user:
+        return USERNAME_MAP.get(user, '')
+    return ''
+
 def scenario_fields_from_log(record):
     """The Scenarios columns a single log record should set (empty values omitted
     so they never overwrite existing data). started supplies identity + date_run;
@@ -1739,8 +1755,12 @@ def scenario_fields_from_log(record):
         f['project_name'] = PROJECT_MAP.get(code, code)
     if record.get('job_id'):
         f['job_id'] = str(record['job_id'])
-    if record.get('user'):
-        f['person'] = record['user']
+    user = record.get('user', '')
+    if user:
+        f['zaratan_username'] = user  
+    person = _log_person(record.get('scenario_name', ''), user)
+    if person:
+        f['person'] = person  
     date_run = _log_date_run(record)
     if date_run:
         f['date_run'] = date_run
