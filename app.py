@@ -146,9 +146,7 @@ GOOGLE_DRIVE_FOLDER_ID = '1RY61HJn1nWGsOlbjBE1lnbsEIH16TTfR'
 
 ALLOWED_EXTENSIONS = {'xml'}
 
-# Zaratan log ingestion
-# Optional shared secret. If INGEST_TOKEN is set in the environment, requests to
-# /ingest_logs must send it as ?token=... or the X-Ingest-Token header.
+# Zaratan log ingestion token for security (Optional)
 INGEST_TOKEN = os.environ.get('INGEST_TOKEN', '')
 
 # Column order for the ZaratanLogs worksheet (raw log storage).
@@ -232,7 +230,6 @@ try:
     try:
         zaratan_logs_sheet = sheet.worksheet('ZaratanLogs')
     except:
-        # Create if doesn't exist
         zaratan_logs_sheet = sheet.add_worksheet(title='ZaratanLogs', rows=1000, cols=len(ZARATAN_LOG_COLUMNS))
         zaratan_logs_sheet.append_row(ZARATAN_LOG_COLUMNS)
 
