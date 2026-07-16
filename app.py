@@ -16,6 +16,13 @@ from lxml import etree
 import gspread
 from google.oauth2.service_account import Credentials
 
+# Load variables from a local .env file for development.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -61,8 +68,11 @@ MAPPINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mapping
 PROJECT_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'projects.csv'), 'code', 'name')
 PERSON_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'people.csv'), 'initials', 'name')
 
+USERNAME_MAP = load_csv_mapping(os.path.join(MAPPINGS_DIR, 'people.csv'), 'zaratan_username', 'name')
+
 print(f"Loaded {len(PROJECT_MAP)} project mappings: {PROJECT_MAP}")
 print(f"Loaded {len(PERSON_MAP)} person mappings: {PERSON_MAP}")
+print(f"Loaded {len(USERNAME_MAP)} zaratan username mappings: {USERNAME_MAP}")
 
 def parse_scenario_filename(filename):
     """Parse configuration filename to extract metadata.
@@ -136,6 +146,18 @@ GOOGLE_DRIVE_FOLDER_ID = '1RY61HJn1nWGsOlbjBE1lnbsEIH16TTfR'
 
 ALLOWED_EXTENSIONS = {'xml'}
 
+# Zaratan log ingestion token for security (Optional)
+INGEST_TOKEN = os.environ.get('INGEST_TOKEN', '')
+
+# Column order for the ZaratanLogs worksheet (raw log storage).
+ZARATAN_LOG_COLUMNS = [
+    'job_id', 'restart_count', 'event', 'scenario_name', 'project_name', 'user',
+    'hostname', 'started_at', 'config_file', 'gcam_dir', 'gcamreport_template_version',
+    'gcam_finished_at', 'gcam_exit_code', 'script_finished_at', 'script_exit_code',
+    'sacct_submit', 'sacct_start', 'sacct_end', 'sacct_elapsed', 'sacct_state',
+    'sacct_exit_code', 'received_at', 'raw_json'
+]
+
 # =============================================================================
 # Google API Setup
 # =============================================================================
@@ -203,7 +225,14 @@ try:
         # Create if doesn't exist
         file_storage_sheet = sheet.add_worksheet(title='FileStorage', rows=1000, cols=3)
         file_storage_sheet.append_row(['file_id', 'filename', 'content'])
-    
+
+    # ZaratanLogs sheet for storing raw run logs sent from the cluster
+    try:
+        zaratan_logs_sheet = sheet.worksheet('ZaratanLogs')
+    except:
+        zaratan_logs_sheet = sheet.add_worksheet(title='ZaratanLogs', rows=1000, cols=len(ZARATAN_LOG_COLUMNS))
+        zaratan_logs_sheet.append_row(ZARATAN_LOG_COLUMNS)
+
     print("✓ Google Sheets connection successful")
 except Exception as e:
     print(f"✗ Error initializing Google APIs: {e}")
@@ -213,6 +242,7 @@ except Exception as e:
     inputs_sheet = None
     junction_sheet = None
     file_storage_sheet = None
+    zaratan_logs_sheet = None
 
 # =============================================================================
 # Helper Functions - Google Sheets
@@ -1190,7 +1220,7 @@ def add_zaratan_columns():
         return jsonify({'error': 'Sheets not available'}), 503
     try:
         headers = scenarios_sheet.row_values(1)
-        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person', 'based_on']
+        new_cols = ['errors', 'submitted', 'finished', 'job_id', 'duration', 'person', 'based_on', 'zaratan_username']
         added = []
         for col in new_cols:
             if col not in headers:
@@ -1616,6 +1646,280 @@ def delete_scenario(scenario_id):
         print(f"Error deleting scenario: {traceback.format_exc()}")
         invalidate_cache()
         return jsonify({'success': False, 'error': str(e)})
+
+# =============================================================================
+# Zaratan Log Ingestion
+# =============================================================================
+def zaratan_log_to_row(record):
+    """Flatten a single Zaratan log record (started or finished) into a row
+    matching ZARATAN_LOG_COLUMNS. Missing fields become empty strings and the
+    full original record is preserved in raw_json."""
+    sacct = record.get('sacct') or {}
+    values = {
+        'job_id': record.get('job_id', ''),
+        'restart_count': record.get('restart_count', ''),
+        'event': record.get('event', ''),
+        'scenario_name': record.get('scenario_name', ''),
+        'project_name': record.get('project_name', ''),
+        'user': record.get('user', ''),
+        'hostname': record.get('hostname', ''),
+        'started_at': record.get('started_at', ''),
+        'config_file': record.get('config_file', ''),
+        'gcam_dir': record.get('gcam_dir', ''),
+        'gcamreport_template_version': record.get('gcamreport_template_version', ''),
+        'gcam_finished_at': record.get('gcam_finished_at', ''),
+        'gcam_exit_code': record.get('gcam_exit_code', ''),
+        'script_finished_at': record.get('script_finished_at', ''),
+        'script_exit_code': record.get('script_exit_code', ''),
+        'sacct_submit': sacct.get('submit', ''),
+        'sacct_start': sacct.get('start', ''),
+        'sacct_end': sacct.get('end', ''),
+        'sacct_elapsed': sacct.get('elapsed', ''),
+        'sacct_state': sacct.get('state', ''),
+        'sacct_exit_code': sacct.get('exit_code', ''),
+        'received_at': datetime.now().isoformat(),
+        'raw_json': json.dumps(record, ensure_ascii=False),
+    }
+    return [values[col] for col in ZARATAN_LOG_COLUMNS]
+
+def zaratan_log_key(job_id, restart_count, event):
+    """Natural unique key for a log record: one started/finished event per job
+    attempt. Normalized to strings so values from the sheet (always strings)
+    compare equal to values from JSON (job_id str, restart_count int)."""
+    return (str(job_id).strip(), str(restart_count).strip(), str(event).strip())
+
+def _log_date_run(record):
+    """YYYY-MM-DD the run actually ran, from started_at (or sacct.start)."""
+    ts = record.get('started_at') or (record.get('sacct') or {}).get('start') or ''
+    ts = str(ts)
+    return ts[:10] if len(ts) >= 10 and ts[:4].isdigit() else ''
+
+def _log_finished(record):
+    """Authoritative finish time: sacct.end unless it's still Unknown, in which
+    case fall back to the script-written gcam_finished_at."""
+    end = str((record.get('sacct') or {}).get('end', '')).strip()
+    if end and end.lower() != 'unknown':
+        return end
+    return str(record.get('gcam_finished_at', '') or '')
+
+def _log_errors(record):
+    """Whether this run errored, as a Yes/No flag to match the webapp's current
+    'errors' checkbox (truthy = checked). A run errors if SLURM ended in a
+    non-success state or GCAM returned a non-zero exit code.
+
+    The detailed reason is preserved (commented out below) for when we want to
+    surface it, e.g. routed into the "Error notes" column. The full detail always
+    lives in ZaratanLogs regardless.
+    """
+    sacct = record.get('sacct') or {}
+    state = str(sacct.get('state', '')).strip()
+    gcam_ec = str(record.get('gcam_exit_code', '')).strip()
+
+    # --- Detailed reason (kept for later use) ---
+    # problems = []
+    # if state and state.upper() not in ('COMPLETED', 'RUNNING'):
+    #     problems.append(state)
+    # if gcam_ec and gcam_ec not in ('0', ''):
+    #     problems.append(f'gcam_exit={gcam_ec}')
+    # return '; '.join(problems)
+
+    bad_state = state.upper() not in ('', 'COMPLETED', 'RUNNING', 'PENDING')
+    bad_exit = gcam_ec not in ('', '0')
+    return 'Yes' if (bad_state or bad_exit) else ''
+
+def _log_person(meta, user):
+    """Resolve the runner's full name for a logged run. Tries the -FL initials
+    parsed from scenario_name (meta['person_name'] via PERSON_MAP) first, then
+    falls back to the Zaratan username mapping (USERNAME_MAP). Returns '' if the
+    person can't be identified from either source. `meta` is the result of
+    parse_scenario_filename(scenario_name)."""
+    name = meta.get('person_name', '')
+    if name:
+        return name
+    if user:
+        return USERNAME_MAP.get(user, '')
+    return ''
+
+def scenario_fields_from_log(record):
+    """The Scenarios columns a single log record should set (empty values omitted
+    so they never overwrite existing data). started supplies identity + date_run;
+    finished supplies submitted/finished/duration/errors."""
+    f = {}
+    scenario_name = record.get('scenario_name', '')
+    meta = parse_scenario_filename(scenario_name) if scenario_name else {}
+    if scenario_name:
+        f['scenario_name'] = scenario_name
+    code = record.get('project_name')
+    if code:
+        f['project_name'] = PROJECT_MAP.get(code, code)
+    if record.get('job_id'):
+        f['job_id'] = str(record['job_id'])
+    user = record.get('user', '')
+    if user:
+        f['zaratan_username'] = user 
+    person = _log_person(meta, user)
+    if person:
+        f['person'] = person  
+    if meta.get('comment'):
+        f['description'] = meta['comment']
+    date_run = _log_date_run(record)
+    if date_run:
+        f['date_run'] = date_run
+    sacct = record.get('sacct') or {}
+    if sacct or record.get('event') == 'finished':
+        if sacct.get('submit'):
+            f['submitted'] = sacct['submit']
+        finished = _log_finished(record)
+        if finished:
+            f['finished'] = finished
+        if sacct.get('elapsed'):
+            f['duration'] = sacct['elapsed']
+        errors = _log_errors(record)
+        if errors:
+            f['errors'] = errors
+    return f
+
+def apply_scenario_upserts(records):
+    """Reflect ingested log records into the Scenarios sheet, keyed by job_id.
+    'started' creates/populates the row; 'finished' updates the same row in place.
+    Restarts and finished-before-started are handled naturally by upserting on
+    job_id. Returns {'created': N, 'updated': M}. Reads the sheet once and writes
+    in batched calls to stay within API rate limits."""
+    if scenarios_sheet is None:
+        return {'created': 0, 'updated': 0}
+    from gspread.utils import rowcol_to_a1
+
+    values = scenarios_sheet.get_all_values()
+    if not values:
+        return {'created': 0, 'updated': 0}
+    header = values[0]
+    col = {name: i for i, name in enumerate(header)}
+    if 'job_id' not in col:
+        return {'created': 0, 'updated': 0}
+    jid_idx = col['job_id']
+
+    # Existing job_id -> sheet row number (1-indexed; data starts at row 2).
+    # Rows with an empty job_id (e.g. website config uploads) are ignored, so a
+    # log always gets its own row rather than attaching to an unrelated one.
+    existing_rownum = {}
+    for i, row in enumerate(values[1:], start=2):
+        if len(row) > jid_idx:
+            jid = str(row[jid_idx]).strip()
+            if jid:
+                existing_rownum[jid] = i
+
+    pending_new = {}      # job_id -> full row list (appended at the end)
+    updates = []          # (row_number, col_idx0, value) for existing rows
+
+    for rec in records:
+        jid = str(rec.get('job_id', '')).strip()
+        if not jid:
+            continue
+        fields = scenario_fields_from_log(rec)
+        if jid in existing_rownum:
+            rownum = existing_rownum[jid]
+            for name, val in fields.items():
+                if val != '' and name in col:
+                    updates.append((rownum, col[name], val))
+        elif jid in pending_new:
+            row = pending_new[jid]
+            for name, val in fields.items():
+                if val != '' and name in col:
+                    row[col[name]] = val
+        else:
+            row = [''] * len(header)
+            base = {
+                'id': str(uuid.uuid4())[:8],
+                # 'Zaratan' is the value the dashboard's "Uploaded through" column
+                # recognizes as the cluster channel (else it shows "Website").
+                'uploaded_by': 'Zaratan',
+                'upload_date': datetime.now().isoformat(),
+            }
+            for name, val in {**base, **fields}.items():
+                if val != '' and name in col:
+                    row[col[name]] = val
+            pending_new[jid] = row
+
+    if pending_new:
+        scenarios_sheet.append_rows(list(pending_new.values()))
+    if updates:
+        batch = [{'range': rowcol_to_a1(r, c + 1), 'values': [[v]]} for (r, c, v) in updates]
+        scenarios_sheet.batch_update(batch)
+
+    return {'created': len(pending_new), 'updated': len(set(u[0] for u in updates))}
+
+@app.route('/ingest_logs', methods=['POST'])
+def ingest_logs():
+    """Receive Zaratan run logs and append them to the ZaratanLogs worksheet.
+
+    Accepts either a single JSON object or a JSON list of objects (a batch).
+    Protected by INGEST_TOKEN when that env var is set (via ?token= or the
+    X-Ingest-Token header).
+
+    Records already present (same job_id+restart_count+event) are skipped, so
+    re-sending a batch never creates duplicate rows. Newly-stored records are
+    also upserted into the Scenarios sheet by job_id (started creates the row,
+    finished updates it). Returns {"received": N, "skipped": M, "scenarios":
+    {...}} on success; the sender can safely delete all files in the batch after
+    any 200 response.
+    """
+    # Auth (only enforced if a token is configured)
+    if INGEST_TOKEN:
+        provided = request.headers.get('X-Ingest-Token') or request.args.get('token', '')
+        if provided != INGEST_TOKEN:
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+    if zaratan_logs_sheet is None:
+        return jsonify({'status': 'error', 'message': 'Sheets unavailable'}), 503
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return jsonify({'status': 'error', 'message': 'Invalid or missing JSON body'}), 400
+
+    records = payload if isinstance(payload, list) else [payload]
+    if not records:
+        return jsonify({'status': 'ok', 'received': 0, 'skipped': 0})
+
+    try:
+        # Build the set of keys already stored so re-sent batches don't create
+        # duplicate rows. job_id/restart_count/event are the first 3 columns.
+        existing = zaratan_logs_sheet.get_all_values()
+        seen = set()
+        for row in existing[1:]:  # skip header
+            if len(row) >= 3:
+                seen.add(zaratan_log_key(row[0], row[1], row[2]))
+
+        rows = []
+        new_records = []
+        skipped = 0
+        for r in records:
+            if not isinstance(r, dict):
+                continue
+            key = zaratan_log_key(r.get('job_id', ''), r.get('restart_count', ''), r.get('event', ''))
+            if key in seen:  # already in the sheet, or a duplicate within this batch
+                skipped += 1
+                continue
+            seen.add(key)
+            rows.append(zaratan_log_to_row(r))
+            new_records.append(r)
+
+        if rows:
+            zaratan_logs_sheet.append_rows(rows)
+        scenarios = {'created': 0, 'updated': 0}
+        scenarios_error = None
+        try:
+            scenarios = apply_scenario_upserts(new_records)
+            invalidate_cache()
+        except Exception as se:
+            scenarios_error = str(se)
+
+        result = {'status': 'ok', 'received': len(rows), 'skipped': skipped,
+                  'scenarios': scenarios}
+        if scenarios_error:
+            result['scenarios_error'] = scenarios_error
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # =============================================================================
 # Main
