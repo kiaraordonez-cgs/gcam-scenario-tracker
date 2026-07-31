@@ -24,7 +24,7 @@
             </tr>
             <tr>
                 <th>Date Run:</th>
-                <td>{{ scenario.date_run or 'Not set' }}</td>
+                <td>{{ scenario.date_run|humandate or 'Not set' }}</td>
             </tr>
             <tr>
                 <th>Description:</th>
@@ -50,7 +50,7 @@
             </tr>
             <tr>
                 <th>Upload Date:</th>
-                <td>{{ scenario.upload_date }}</td>
+                <td>{{ scenario.upload_date|humandatetime }}</td>
             </tr>
         </table>
         <div class="actions">

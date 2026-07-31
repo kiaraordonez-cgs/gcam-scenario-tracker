@@ -48,7 +48,7 @@
             </tr>
             <tr>
                 <th>Upload Date:</th>
-                <td>{{ input_file.upload_date }}</td>
+                <td>{{ input_file.upload_date|humandatetime }}</td>
             </tr>
         </table>
         <div class="actions">
@@ -79,7 +79,7 @@
                     <td><a href="{{ url_for('scenario_detail', scenario_id=scenario.id) }}">{{ scenario.scenario_name }}</a></td>
                     <td><code>{{ scenario.component_key }}</code></td>
                     <td>{{ scenario.project_name or 'N/A' }}</td>
-                    <td>{{ scenario.upload_date[:10] }}</td>
+                    <td>{{ scenario.upload_date|humandate }}</td>
                     <td>
                         <a href="{{ url_for('scenario_detail', scenario_id=scenario.id) }}" class="btn-small">View</a>
                     </td>

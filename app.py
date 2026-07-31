@@ -31,6 +31,41 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'change-this-to-a-random-secret-key'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
 
+
+
+def _parse_timestamp(value):
+    """Parse the timestamp formats found in the sheet. None if unrecognised."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace(' ', 'T', 1)
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+@app.template_filter('humandatetime')
+def humandatetime(value):
+    """2026-07-14T13:23:10 -> Jul 14, 2026, 1:23 PM"""
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return '' if value is None else str(value)
+    hour = parsed.hour % 12 or 12
+    meridiem = 'AM' if parsed.hour < 12 else 'PM'
+    return f"{parsed:%b} {parsed.day}, {parsed.year}, {hour}:{parsed.minute:02d} {meridiem}"
+
+
+@app.template_filter('humandate')
+def humandate(value):
+    """2026-07-14T13:23:10 -> Jul 14, 2026"""
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return '' if value is None else str(value)
+    return f"{parsed:%b} {parsed.day}, {parsed.year}"
+
 # Google Configuration
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',

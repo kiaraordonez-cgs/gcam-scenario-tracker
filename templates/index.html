@@ -41,8 +41,8 @@
         <div class="table-wrapper">
             <table class="data-table sortable" id="scenarios-table">
                 <thead><tr>
-                    <th><input type="checkbox" id="select-all-scenarios"></th>
-                    <th class="sortable">Scenario Name</th>
+                    <th class="col-pin-1"><input type="checkbox" id="select-all-scenarios"></th>
+                    <th class="sortable col-pin-2">Scenario Name</th>
                     <th class="sortable">Other Name</th>
                     <th class="sortable">Project</th>
                     <th class="sortable">Based on</th>
@@ -73,7 +73,7 @@
         <div class="table-wrapper">
             <table class="data-table sortable" id="inputs-table">
                 <thead><tr>
-                    <th class="sortable">File Name</th>
+                    <th class="sortable col-pin-1">File Name</th>
                     <th class="sortable">Regions Modified</th>
                     <th class="sortable">Years Modified</th>
                     <th class="sortable">Sectors Modified</th>
@@ -99,9 +99,44 @@
 <script>
 function esc(val) {
     if (val == null) return '';
-    const d = document.createElement('div');
-    d.textContent = String(val);
-    return d.innerHTML;
+    return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+const DATE_LOCALE = 'en-US';
+const DATETIME_FMT = { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+const DATE_FMT = { year: 'numeric', month: 'short', day: 'numeric' };
+
+function parseTs(val) {
+    if (val == null) return null;
+    let s = String(val).trim();
+    if (!s) return null;
+
+    s = s.replace(' ', 'T');
+    s = s.replace(/(\.\d{3})\d+/, '$1');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += 'T00:00:00';
+
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function fmtDateTime(val) {
+    const d = parseTs(val);
+    return d ? d.toLocaleString(DATE_LOCALE, DATETIME_FMT) : (val == null ? '' : String(val));
+}
+
+function fmtDate(val) {
+    const d = parseTs(val);
+    return d ? d.toLocaleDateString(DATE_LOCALE, DATE_FMT) : (val == null ? '' : String(val));
+}
+
+function tsKey(val) {
+    const d = parseTs(val);
+    return d ? d.getTime() : '';
 }
 
 function loadData(retries) {
@@ -153,14 +188,14 @@ function renderScenarios(scenarios, projects) {
     const allNames = scenarios.map(x => x.scenario_name).filter(n => n);
     
     tbody.innerHTML = scenarios.map(s => {
-        const ud = s.upload_date ? String(s.upload_date).substring(0,10) : '';
+        const ud = fmtDate(s.upload_date);
         const ub = s.uploaded_by || '';
         // "Uploaded through" is fixed: legacy Manual/User -> Website
         const uploadedThrough = (ub === 'Zaratan') ? 'Zaratan' : 'Website';
         const basedOn = s.based_on || '';
         return `<tr data-id="${esc(s.id)}" data-project="${esc(s.project_name||'')}">
-            <td><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
-            <td><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
+            <td class="col-pin-1"><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
+            <td class="col-pin-2" title="${esc(s.scenario_name)}"><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
             <td class="editable" data-field="personal_scenario_name">${esc(s.personal_scenario_name||'')}</td>
             <td><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','project_name',this.value)">
                 <option value="">Select...</option>
@@ -173,12 +208,12 @@ function renderScenarios(scenarios, projects) {
             </select></td>
             <td class="editable" data-field="person">${esc(s.person||'')}</td>
             <td class="editable" data-field="description">${esc(s.description||'')}</td>
-            <td class="editable" data-field="submitted">${esc(s.submitted||'')}</td>
-            <td class="editable" data-field="finished">${esc(s.finished||'')}</td>
+            <td class="editable" data-field="submitted" data-raw="${esc(s.submitted||'')}" data-sort-value="${tsKey(s.submitted)}" title="${esc(s.submitted||'')}">${esc(fmtDateTime(s.submitted))}</td>
+            <td class="editable" data-field="finished" data-raw="${esc(s.finished||'')}" data-sort-value="${tsKey(s.finished)}" title="${esc(s.finished||'')}">${esc(fmtDateTime(s.finished))}</td>
             <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateScenario('${esc(s.id)}','errors',this.checked?'Yes':'')"></td>
             <td class="editable" data-field="additional_notes">${esc(s.additional_notes||'')}</td>
             <td>${esc(uploadedThrough)}</td>
-            <td>${esc(ud)}</td>
+            <td data-sort-value="${tsKey(s.upload_date)}" title="${esc(s.upload_date||'')}">${esc(ud)}</td>
             <td class="editable" data-field="job_id">${esc(s.job_id||'')}</td>
             <td class="editable" data-field="zaratan_link">${esc(s.zaratan_link||'')}</td>
             <td><span class="badge">${s.input_count||0}</span></td>
@@ -197,9 +232,9 @@ function renderInputFiles(inputs) {
         return;
     }
     tbody.innerHTML = inputs.map(inp => {
-        const ud = inp.upload_date ? String(inp.upload_date).substring(0,10) : '';
+        const ud = fmtDate(inp.upload_date);
         return `<tr data-id="${esc(inp.id)}">
-            <td><a href="/input/${esc(inp.id)}">${esc(inp.file_name)}</a></td>
+            <td class="col-pin-1" title="${esc(inp.file_name)}"><a href="/input/${esc(inp.id)}">${esc(inp.file_name)}</a></td>
             <td>${esc(inp.regions_modified||'N/A')}</td>
             <td>${esc(inp.years_modified||'N/A')}</td>
             <td>${esc(inp.sectors_modified||'N/A')}</td>
@@ -208,36 +243,43 @@ function renderInputFiles(inputs) {
             <td class="editable" data-field="description">${esc(inp.description||'')}</td>
             <td class="editable" data-field="additional_notes">${esc(inp.additional_notes||'')}</td>
             <td>${esc(inp.uploaded_by||'')}</td>
-            <td>${esc(ud)}</td>
+            <td data-sort-value="${tsKey(inp.upload_date)}" title="${esc(inp.upload_date||'')}">${esc(ud)}</td>
             <td><span class="badge">${inp.scenario_count||0}</span></td>
             <td>${inp.file_path ? `<a href="/download/input/${esc(inp.id)}" class="btn-small">Download</a>` : '<span class="text-muted">No file</span>'}</td>
         </tr>`;
     }).join('');
 }
 
+function cellEditValue(cell) {
+    return (cell.dataset.raw !== undefined ? cell.dataset.raw : cell.textContent).trim();
+}
+
+function cellCommit(cell, value) {
+    if (cell.dataset.raw !== undefined) {
+        cell.dataset.raw = value;
+        cell.dataset.sortValue = tsKey(value);
+        cell.title = value;
+        cell.textContent = fmtDateTime(value);
+    } else {
+        cell.textContent = value;
+    }
+}
+
+function makeEditable(cell, save) {
+    cell.addEventListener('click', function() {
+        if (this.querySelector('input')) return;
+        const val = cellEditValue(this), field = this.dataset.field, id = this.closest('tr').dataset.id;
+        const input = document.createElement('input');
+        input.value = val; input.className = 'inline-edit';
+        input.addEventListener('blur', function() { cellCommit(cell, this.value); save(id, field, this.value); });
+        input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
+        this.textContent = ''; this.appendChild(input); input.focus();
+    });
+}
+
 function setupEditableCells() {
-    document.querySelectorAll('#scenarios-table .editable').forEach(cell => {
-        cell.addEventListener('click', function() {
-            if (this.querySelector('input')) return;
-            const val = this.textContent.trim(), field = this.dataset.field, id = this.closest('tr').dataset.id;
-            const input = document.createElement('input');
-            input.value = val; input.className = 'inline-edit';
-            input.addEventListener('blur', function() { cell.textContent = this.value; updateScenario(id, field, this.value); });
-            input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
-            this.textContent = ''; this.appendChild(input); input.focus();
-        });
-    });
-    document.querySelectorAll('#inputs-table .editable').forEach(cell => {
-        cell.addEventListener('click', function() {
-            if (this.querySelector('input')) return;
-            const val = this.textContent.trim(), field = this.dataset.field, id = this.closest('tr').dataset.id;
-            const input = document.createElement('input');
-            input.value = val; input.className = 'inline-edit';
-            input.addEventListener('blur', function() { cell.textContent = this.value; updateInput(id, field, this.value); });
-            input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
-            this.textContent = ''; this.appendChild(input); input.focus();
-        });
-    });
+    document.querySelectorAll('#scenarios-table .editable').forEach(cell => makeEditable(cell, updateScenario));
+    document.querySelectorAll('#inputs-table .editable').forEach(cell => makeEditable(cell, updateInput));
 }
 
 function updateScenario(id, field, value) {
