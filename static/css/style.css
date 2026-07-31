@@ -13,7 +13,7 @@ body {
 }
 
 .container {
-    max-width: 1600px;
+    max-width: 1920px;
     margin: 0 auto;
     padding: 0;
 }
@@ -151,7 +151,7 @@ body {
     display: none;
     padding: 24px;
     background: #f9fafb;
-    min-height: calc(100vh - 200px);
+    min-height: 0;
 }
 
 .tab-content.active {
@@ -203,7 +203,9 @@ body {
 .table-wrapper {
     background: white;
     border-radius: 12px;
-    overflow-x: auto;
+    overflow: auto;
+    max-height: calc(100vh - 300px);
+    min-height: 320px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     border: 1px solid #e5e7eb;
 }
@@ -211,8 +213,9 @@ body {
 /* Data Tables */
 .data-table {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.85rem;
 }
 
 .data-table thead {
@@ -221,18 +224,23 @@ body {
 }
 
 .data-table th {
-    padding: 16px;
+    padding: 8px 10px;
     text-align: left;
     font-weight: 600;
     color: #374151;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
 }
 
 .data-table td {
-    padding: 16px;
+    padding: 8px 10px;
     border-top: 1px solid #f3f4f6;
+    max-width: 240px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .data-table tbody tr {
@@ -399,7 +407,8 @@ body {
     }
     
     .table-wrapper {
-        overflow-x: auto;
+        overflow: auto;
+        max-height: calc(100vh - 220px);
     }
     
     .action-buttons {
@@ -537,4 +546,67 @@ body {
     height: 16px;
     cursor: pointer;
     accent-color: #dc2626;
+}
+
+.data-table thead th {
+    position: sticky;
+    z-index: 3;
+    background: #f9fafb;
+}
+
+.data-table thead tr:first-child th {
+    top: 0;
+    height: 38px;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.data-table thead tr.filter-row th {
+    top: 38px;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+#scenarios-table .col-pin-1 {
+    left: 0;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    padding-left: 12px;
+    padding-right: 4px;
+}
+
+#scenarios-table .col-pin-2 {
+    left: 44px;
+    min-width: 200px;
+}
+
+#inputs-table .col-pin-1 {
+    left: 0;
+    min-width: 220px;
+}
+
+.data-table td.col-pin-1,
+.data-table td.col-pin-2 {
+    position: sticky;
+    z-index: 2;
+    background: white;
+}
+
+.data-table th.col-pin-1,
+.data-table th.col-pin-2 {
+    z-index: 4;
+}
+
+#scenarios-table .col-pin-2,
+#inputs-table .col-pin-1 {
+    box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.15);
+}
+
+.data-table tbody tr:hover td.col-pin-1,
+.data-table tbody tr:hover td.col-pin-2 {
+    background-color: #f9fafb;
+}
+
+.data-table td.col-pin-2,
+#inputs-table td.col-pin-1 {
+    max-width: 320px;
 }

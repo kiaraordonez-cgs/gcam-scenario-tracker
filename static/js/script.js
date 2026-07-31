@@ -3,6 +3,14 @@ console.log('GCAM Scenario Tracker loaded');
 // =============================================================================
 // Table Sorting
 // =============================================================================
+
+function sortKey(cell) {
+    if (!cell) return '';
+    const raw = cell.dataset.sortValue;
+    if (raw !== undefined && raw !== '') return raw.trim().toLowerCase();
+    return (cell.textContent || '').trim().toLowerCase();
+}
+
 function setupTableSorting() {
     console.log('Setting up table sorting...');
     document.querySelectorAll('table.data-table thead th.sortable').forEach(th => {
@@ -22,8 +30,8 @@ function setupTableSorting() {
             // Sort rows
             const rows = Array.from(tbody.querySelectorAll('tr'));
             rows.sort((a, b) => {
-                const aText = (a.cells[columnIndex]?.textContent || '').trim().toLowerCase();
-                const bText = (b.cells[columnIndex]?.textContent || '').trim().toLowerCase();
+                const aText = sortKey(a.cells[columnIndex]);
+                const bText = sortKey(b.cells[columnIndex]);
                 const aNum = parseFloat(aText);
                 const bNum = parseFloat(bText);
                 
@@ -47,14 +55,20 @@ function setupColumnFilters() {
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
         if (!tbody || tbody.rows.length === 0) return;
-        
+        const existing = thead.querySelector('tr.filter-row');
+        if (existing) existing.remove();
+
         const headerRow = thead.querySelector('tr');
         const filterRow = document.createElement('tr');
         filterRow.className = 'filter-row';
-        
+
         headerRow.querySelectorAll('th').forEach((th, colIdx) => {
             const filterCell = document.createElement('th');
-            
+
+            th.classList.forEach(c => {
+                if (c.startsWith('col-pin-')) filterCell.classList.add(c);
+            });
+
             // Skip checkbox and actions columns only
             const text = th.textContent.trim();
             if (th.querySelector('input[type="checkbox"]') || text === 'Actions') {
