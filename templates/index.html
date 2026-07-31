@@ -44,8 +44,8 @@
                     <th class="col-pin-1"><input type="checkbox" id="select-all-scenarios"></th>
                     <th class="sortable col-pin-2">Scenario Name</th>
                     <th class="sortable">Other Name</th>
-                    <th class="sortable">Project</th>
-                    <th class="sortable">Based on</th>
+                    <th class="sortable col-project">Project</th>
+                    <th class="sortable col-based-on">Based on</th>
                     <th class="sortable">Run by</th>
                     <th class="sortable">Description</th>
                     <th class="sortable">Submitted</th>
@@ -197,12 +197,12 @@ function renderScenarios(scenarios, projects) {
             <td class="col-pin-1"><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
             <td class="col-pin-2" title="${esc(s.scenario_name)}"><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
             <td class="editable" data-field="personal_scenario_name">${esc(s.personal_scenario_name||'')}</td>
-            <td><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','project_name',this.value)">
+            <td class="col-project"><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','project_name',this.value)">
                 <option value="">Select...</option>
                 ${projects.map(p=>`<option value="${esc(p)}" ${s.project_name===p?'selected':''}>${esc(p)}</option>`).join('')}
                 <option value="__new__">+ Add New</option>
             </select></td>
-            <td><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','based_on',this.value)">
+            <td class="col-based-on" title="${esc(basedOn)}"><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','based_on',this.value)">
                 <option value="">Select...</option>
                 ${allNames.filter(n=>n!==s.scenario_name).map(n=>`<option value="${esc(n)}" ${basedOn===n?'selected':''}>${esc(n)}</option>`).join('')}
             </select></td>

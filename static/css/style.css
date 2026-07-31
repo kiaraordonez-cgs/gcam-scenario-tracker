@@ -532,6 +532,42 @@ body {
 }
 
 /* Uploaded By dropdown */
+.inline-edit {
+    width: 100%;
+    max-width: 100%;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+    font-family: inherit;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: white;
+    color: #111;
+    text-overflow: ellipsis;
+}
+
+select.inline-edit {
+    cursor: pointer;
+}
+
+#scenarios-table .col-project,
+#scenarios-table .col-based-on {
+    max-width: none;
+}
+
+#scenarios-table .col-project {
+    min-width: 160px;
+}
+
+#scenarios-table .col-based-on {
+    min-width: 280px;
+}
+
+.inline-edit:focus {
+    outline: none;
+    border-color: #dc2626;
+    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
+
 .inline-edit-sm {
     padding: 2px 4px;
     font-size: 0.8rem;
