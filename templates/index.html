@@ -48,8 +48,8 @@
                     <th class="sortable col-based-on">Based on</th>
                     <th class="sortable">Run by</th>
                     <th class="sortable">Description</th>
-                    <th class="sortable">Submitted</th>
-                    <th class="sortable">Finished</th>
+                    <th class="sortable col-datetime">Submitted</th>
+                    <th class="sortable col-datetime">Finished</th>
                     <th class="sortable">Errors</th>
                     <th class="sortable">Error notes</th>
                     <th class="sortable">Uploaded through</th>
@@ -139,6 +139,26 @@ function tsKey(val) {
     return d ? d.getTime() : '';
 }
 
+const DATETIME_FIELDS = new Set(['submitted', 'finished']);
+
+function splitTimestamp(val) {
+    const s = String(val == null ? '' : val).trim();
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?(Z|[+-]\d{2}:?\d{2})?$/);
+    if (!m) return null;
+    return { date: m[1], hh: m[2], mm: m[3], ss: m[4] || '', offset: m[5] || '' };
+}
+
+
+function toPickerValue(parts) {
+    return parts ? `${parts.date}T${parts.hh}:${parts.mm}` : '';
+}
+
+function fromPickerValue(value, parts, raw) {
+    if (!value) return '';
+    if (parts && toPickerValue(parts) === value) return raw;
+    return `${value}:00${parts ? parts.offset : ''}`;
+}
+
 function loadData(retries) {
     if (retries === undefined) retries = 3;
     fetch('/api/data')
@@ -208,8 +228,8 @@ function renderScenarios(scenarios, projects) {
             </select></td>
             <td class="editable" data-field="person">${esc(s.person||'')}</td>
             <td class="editable" data-field="description">${esc(s.description||'')}</td>
-            <td class="editable" data-field="submitted" data-raw="${esc(s.submitted||'')}" data-sort-value="${tsKey(s.submitted)}" title="${esc(s.submitted||'')}">${esc(fmtDateTime(s.submitted))}</td>
-            <td class="editable" data-field="finished" data-raw="${esc(s.finished||'')}" data-sort-value="${tsKey(s.finished)}" title="${esc(s.finished||'')}">${esc(fmtDateTime(s.finished))}</td>
+            <td class="editable col-datetime" data-field="submitted" data-raw="${esc(s.submitted||'')}" data-sort-value="${tsKey(s.submitted)}" title="${esc(s.submitted||'')}">${esc(fmtDateTime(s.submitted))}</td>
+            <td class="editable col-datetime" data-field="finished" data-raw="${esc(s.finished||'')}" data-sort-value="${tsKey(s.finished)}" title="${esc(s.finished||'')}">${esc(fmtDateTime(s.finished))}</td>
             <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateScenario('${esc(s.id)}','errors',this.checked?'Yes':'')"></td>
             <td class="editable" data-field="additional_notes">${esc(s.additional_notes||'')}</td>
             <td>${esc(uploadedThrough)}</td>
@@ -270,10 +290,28 @@ function makeEditable(cell, save) {
         if (this.querySelector('input')) return;
         const val = cellEditValue(this), field = this.dataset.field, id = this.closest('tr').dataset.id;
         const input = document.createElement('input');
-        input.value = val; input.className = 'inline-edit';
-        input.addEventListener('blur', function() { cellCommit(cell, this.value); save(id, field, this.value); });
+        input.className = 'inline-edit';
+
+        const parts = DATETIME_FIELDS.has(field) ? splitTimestamp(val) : null;
+        const usePicker = DATETIME_FIELDS.has(field) && (parts !== null || val === '');
+
+        if (usePicker) {
+            input.type = 'datetime-local';
+            input.value = toPickerValue(parts);
+        } else {
+            input.value = val;
+        }
+
+        input.addEventListener('blur', function() {
+            const next = usePicker ? fromPickerValue(this.value, parts, val) : this.value;
+            cellCommit(cell, next);
+            if (next !== val) save(id, field, next);
+        });
         input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
         this.textContent = ''; this.appendChild(input); input.focus();
+        if (usePicker && typeof input.showPicker === 'function') {
+            try { input.showPicker(); } catch (e) { /* keyboard entry still works */ }
+        }
     });
 }
 

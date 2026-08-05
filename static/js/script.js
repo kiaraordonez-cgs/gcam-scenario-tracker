@@ -66,7 +66,7 @@ function setupColumnFilters() {
             const filterCell = document.createElement('th');
 
             th.classList.forEach(c => {
-                if (c.startsWith('col-pin-')) filterCell.classList.add(c);
+                if (c.startsWith('col-')) filterCell.classList.add(c);
             });
 
             // Skip checkbox and actions columns only

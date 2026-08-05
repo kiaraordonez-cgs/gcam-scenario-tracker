@@ -562,6 +562,11 @@ select.inline-edit {
     min-width: 280px;
 }
 
+#scenarios-table .col-datetime {
+    min-width: 210px;
+    max-width: none;
+}
+
 .inline-edit:focus {
     outline: none;
     border-color: #dc2626;

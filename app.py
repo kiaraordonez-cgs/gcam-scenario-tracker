@@ -40,11 +40,17 @@ def _parse_timestamp(value):
     text = str(value).strip()
     if not text:
         return None
-    text = text.replace(' ', 'T', 1)
+    iso = text.replace(' ', 'T', 1)
     try:
-        return datetime.fromisoformat(text)
+        return datetime.fromisoformat(iso)
     except ValueError:
-        return None
+        pass
+    for fmt in ('%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 @app.template_filter('humandatetime')
@@ -287,6 +293,20 @@ def sheets_available():
     """Check if Google Sheets connection is available"""
     return scenarios_sheet is not None
 
+
+SCENARIO_TEXT_COLUMNS = [1, 11, 16]   # id, config_file_id, job_id
+INPUT_TEXT_COLUMNS = [1, 12]          # id, file_id
+JUNCTION_TEXT_COLUMNS = [1, 2]        # scenario_id, input_file_id
+
+def read_scenario_records():
+    return scenarios_sheet.get_all_records(numericise_ignore=SCENARIO_TEXT_COLUMNS)
+
+def read_input_records():
+    return inputs_sheet.get_all_records(numericise_ignore=INPUT_TEXT_COLUMNS)
+
+def read_junction_records():
+    return junction_sheet.get_all_records(numericise_ignore=JUNCTION_TEXT_COLUMNS)
+
 # Simple in-memory cache to speed up page loads
 _cache = {'data': None, 'timestamp': 0}
 CACHE_TTL = 60  # seconds - longer cache = fewer API calls
@@ -304,21 +324,21 @@ def get_cached_data():
     
     try:
         print("Loading scenarios...")
-        scenarios = scenarios_sheet.get_all_records()
+        scenarios = read_scenario_records()
         print(f"  Loaded {len(scenarios)} scenarios")
     except Exception as e:
         print(f"  ERROR loading scenarios: {e}")
     
     try:
         print("Loading junctions...")
-        junctions = junction_sheet.get_all_records()
+        junctions = read_junction_records()
         print(f"  Loaded {len(junctions)} junctions")
     except Exception as e:
         print(f"  ERROR loading junctions: {e}")
     
     try:
         print("Loading input files...")
-        inputs = inputs_sheet.get_all_records()
+        inputs = read_input_records()
         print(f"  Loaded {len(inputs)} input files")
     except Exception as e:
         print(f"  ERROR loading inputs: {e}")
@@ -332,26 +352,58 @@ def invalidate_cache():
     _cache['data'] = None
     _cache['timestamp'] = 0
 
+def patch_cached_record(collection, record_id, updates):
+    """Apply field updates to a record already held in the cache.
+
+    Invalidating after a single-field edit is expensive: the next /api/data
+    then cold-reads all three sheets. Since we know exactly what changed, we
+    patch the cached record in place instead and leave the TTL as a backstop.
+
+    'updates' keys are sheet header names, which are also the keys produced by
+    get_all_records() and the field names posted by the dashboard.
+
+    Returns the patched record, or None when the cache is cold or the record
+    is absent — callers must then fall back to invalidate_cache(), since a
+    partial cache is worse than no cache.
+
+    Safe without locking under the deployed config (gunicorn, one sync worker;
+    see Procfile). Revisit if the app ever runs multi-threaded.
+    """
+    data = _cache.get('data')
+    if not data:
+        return None
+    for record in data.get(collection, []):
+        if str(record.get('id')) == str(record_id):
+            record.update(updates)
+            return record
+    return None
+
 def compute_duration(submitted_str, finished_str):
-    """Compute duration between two datetime strings"""
-    try:
-        # Try various formats
-        for fmt in ['%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M', '%m/%d/%Y %H:%M', '%Y-%m-%d %H:%M:%S']:
-            try:
-                t1 = datetime.strptime(submitted_str.strip(), fmt)
-                t2 = datetime.strptime(finished_str.strip(), fmt)
-                diff = t2 - t1
-                total_minutes = int(diff.total_seconds() / 60)
-                hours = total_minutes // 60
-                minutes = total_minutes % 60
-                if hours > 0:
-                    return f"{hours}h {minutes}m"
-                return f"{minutes}m"
-            except ValueError:
-                continue
+    """Elapsed time between two stored timestamps, as e.g. '3h 12m'.
+
+    The two ends of a run are not stored in the same format - 'submitted' is
+    typically naive ('2026-07-14 13:23:10') while 'finished' carries a UTC
+    offset ('2026-07-14T13:43:24-04:00'). Each side is therefore parsed
+    independently; requiring a single format to fit both is what made this
+    return '' for every record in the sheet.
+
+    Returns '' when either side is unparseable or the range is negative.
+    """
+    start = _parse_timestamp(submitted_str)
+    end = _parse_timestamp(finished_str)
+    if start is None or end is None:
         return ''
-    except:
+    if (start.tzinfo is None) != (end.tzinfo is None):
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=end.tzinfo)
+        else:
+            end = end.replace(tzinfo=start.tzinfo)
+
+    total_minutes = int((end - start).total_seconds() // 60)
+    if total_minutes < 0:
         return ''
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours}h {minutes}m" if hours else f"{minutes}m"
 
 def get_next_id(worksheet):
     """Get next available ID for a sheet"""
@@ -383,9 +435,9 @@ def find_row_by_value(worksheet, column, value):
 def get_all_scenarios():
     """Get all scenarios from Google Sheet"""
     try:
-        records = scenarios_sheet.get_all_records()
+        records = read_scenario_records()
         # Count input files for each scenario
-        junction_records = junction_sheet.get_all_records()
+        junction_records = read_junction_records()
         
         for record in records:
             record['input_count'] = sum(1 for j in junction_records if str(j.get('scenario_id')) == str(record.get('id')))
@@ -398,9 +450,9 @@ def get_all_scenarios():
 def get_all_input_files():
     """Get all input files from Google Sheet"""
     try:
-        records = inputs_sheet.get_all_records()
+        records = read_input_records()
         # Count scenarios for each input file
-        junction_records = junction_sheet.get_all_records()
+        junction_records = read_junction_records()
         
         for record in records:
             record['scenario_count'] = sum(1 for j in junction_records if str(j.get('input_file_id')) == str(record.get('id')))
@@ -413,7 +465,7 @@ def get_all_input_files():
 def get_scenario_by_id(scenario_id):
     """Get scenario by ID"""
     try:
-        records = scenarios_sheet.get_all_records()
+        records = read_scenario_records()
         for record in records:
             if str(record.get('id')) == str(scenario_id):
                 return record
@@ -425,7 +477,7 @@ def get_scenario_by_id(scenario_id):
 def get_input_by_id(input_id):
     """Get input file by ID"""
     try:
-        records = inputs_sheet.get_all_records()
+        records = read_input_records()
         for record in records:
             if str(record.get('id')) == str(input_id):
                 return record
@@ -437,8 +489,8 @@ def get_input_by_id(input_id):
 def get_input_files_for_scenario(scenario_id):
     """Get all input files linked to a scenario"""
     try:
-        junction_records = junction_sheet.get_all_records()
-        input_records = inputs_sheet.get_all_records()
+        junction_records = read_junction_records()
+        input_records = read_input_records()
         
         linked_input_ids = [j['input_file_id'] for j in junction_records if str(j['scenario_id']) == str(scenario_id)]
         
@@ -460,8 +512,8 @@ def get_input_files_for_scenario(scenario_id):
 def get_scenarios_for_input(input_id):
     """Get all scenarios using an input file"""
     try:
-        junction_records = junction_sheet.get_all_records()
-        scenario_records = scenarios_sheet.get_all_records()
+        junction_records = read_junction_records()
+        scenario_records = read_scenario_records()
         
         linked_scenario_ids = [j['scenario_id'] for j in junction_records if str(j['input_file_id']) == str(input_id)]
         
@@ -795,7 +847,7 @@ def upload_config():
         # First, get all existing input file names in one call
         existing_files = {}
         try:
-            all_inputs = inputs_sheet.get_all_records()
+            all_inputs = read_input_records()
             for inp in all_inputs:
                 existing_files[inp['file_name']] = inp['id']
         except:
@@ -935,52 +987,50 @@ def update_scenario(scenario_id):
             return jsonify({'status': 'error', 'message': 'Scenario not found'}), 404
         
         data = request.form
-        
-        # Update cells (columns match header order)
-        if 'personal_scenario_name' in data:
-            scenarios_sheet.update_cell(row, 3, data['personal_scenario_name'])
-        if 'project_name' in data:
-            scenarios_sheet.update_cell(row, 4, data['project_name'])
-        if 'date_run' in data:
-            scenarios_sheet.update_cell(row, 5, data['date_run'])
-        if 'description' in data:
-            scenarios_sheet.update_cell(row, 6, data['description'])
-        if 'zaratan_link' in data:
-            scenarios_sheet.update_cell(row, 7, data['zaratan_link'])
-        if 'additional_notes' in data:
-            scenarios_sheet.update_cell(row, 8, data['additional_notes'])
-        # uploaded_by (col 9) is fixed - not editable
-        # New Zaratan columns (13-17)
-        if 'errors' in data:
-            scenarios_sheet.update_cell(row, 13, data['errors'])
-        if 'submitted' in data:
-            scenarios_sheet.update_cell(row, 14, data['submitted'])
-            # Recompute duration if both submitted and finished exist
+
+        SCENARIO_COLUMNS = {
+            'personal_scenario_name': 3,
+            'project_name': 4,
+            'date_run': 5,
+            'description': 6,
+            'zaratan_link': 7,
+            'additional_notes': 8,
+            'errors': 13,
+            'submitted': 14,
+            'finished': 15,
+            'job_id': 16,
+            'person': 18,
+            'based_on': 19,
+        }
+
+        applied = {}
+        for field, column in SCENARIO_COLUMNS.items():
+            if field in data:
+                scenarios_sheet.update_cell(row, column, data[field])
+                applied[field] = data[field]
+
+        cached = patch_cached_record('scenarios', scenario_id, applied)
+
+        if 'submitted' in applied or 'finished' in applied:
             try:
-                row_data = scenarios_sheet.row_values(row)
-                finished = row_data[14] if len(row_data) > 14 else ''
-                if data['submitted'] and finished:
-                    duration = compute_duration(data['submitted'], finished)
+                if cached is not None:
+                    submitted = str(cached.get('submitted', ''))
+                    finished = str(cached.get('finished', ''))
+                else:
+                    row_data = scenarios_sheet.row_values(row)
+                    submitted = row_data[13] if len(row_data) > 13 else ''
+                    finished = row_data[14] if len(row_data) > 14 else ''
+                if submitted and finished:
+                    duration = compute_duration(submitted, finished)
                     scenarios_sheet.update_cell(row, 17, duration)
-            except: pass
-        if 'finished' in data:
-            scenarios_sheet.update_cell(row, 15, data['finished'])
-            # Recompute duration
-            try:
-                row_data = scenarios_sheet.row_values(row)
-                submitted = row_data[13] if len(row_data) > 13 else ''
-                if submitted and data['finished']:
-                    duration = compute_duration(submitted, data['finished'])
-                    scenarios_sheet.update_cell(row, 17, duration)
-            except: pass
-        if 'job_id' in data:
-            scenarios_sheet.update_cell(row, 16, data['job_id'])
-        if 'person' in data:
-            scenarios_sheet.update_cell(row, 18, data['person'])
-        if 'based_on' in data:
-            scenarios_sheet.update_cell(row, 19, data['based_on'])
-        
-        invalidate_cache()
+                    if cached is not None:
+                        cached['duration'] = duration
+            except Exception as e:
+                app.logger.warning('duration recompute failed for %s: %s', scenario_id, e)
+
+        if cached is None:
+            invalidate_cache()
+
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -994,17 +1044,23 @@ def update_input(input_id):
             return jsonify({'status': 'error', 'message': 'Input file not found'}), 404
         
         data = request.form
-        
-        # Update cells
-        if 'policy_name' in data:
-            inputs_sheet.update_cell(row, 6, data['policy_name'])
-        if 'folder_location' in data:
-            inputs_sheet.update_cell(row, 7, data['folder_location'])
-        if 'description' in data:
-            inputs_sheet.update_cell(row, 8, data['description'])
-        if 'additional_notes' in data:
-            inputs_sheet.update_cell(row, 9, data['additional_notes'])
-        
+
+        INPUT_COLUMNS = {
+            'policy_name': 6,
+            'folder_location': 7,
+            'description': 8,
+            'additional_notes': 9,
+        }
+
+        applied = {}
+        for field, column in INPUT_COLUMNS.items():
+            if field in data:
+                inputs_sheet.update_cell(row, column, data[field])
+                applied[field] = data[field]
+
+        if patch_cached_record('inputs', input_id, applied) is None:
+            invalidate_cache()
+
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1102,8 +1158,8 @@ def migrate_folder_locations():
     
     try:
         # Get all scenarios with their config files
-        scenarios = scenarios_sheet.get_all_records()
-        input_records = inputs_sheet.get_all_records()
+        scenarios = read_scenario_records()
+        input_records = read_input_records()
         
         # Build a complete map of filename -> folder_location from all configs
         file_folder_map = {}
@@ -1178,7 +1234,7 @@ def cleanup_orphaned_junctions():
         return jsonify({'error': 'Sheets not available'}), 503
     try:
         # Valid scenario IDs (the ones that still exist)
-        scenarios = scenarios_sheet.get_all_records()
+        scenarios = read_scenario_records()
         valid_scenario_ids = set(str(s.get('id', '')).strip() for s in scenarios)
         
         # --- Clean junctions ---
@@ -1439,7 +1495,7 @@ def compare_scenarios():
         
         # Get folder info from input files sheet
         try:
-            all_inputs = inputs_sheet.get_all_records()
+            all_inputs = read_input_records()
             for inp in all_inputs:
                 file_folder_map[inp.get('file_name', '')] = inp.get('folder_location', '')
         except:
