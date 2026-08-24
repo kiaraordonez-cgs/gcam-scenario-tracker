@@ -1,5 +1,29 @@
 console.log('GCAM Scenario Tracker loaded');
 
+function notify(message, kind) {
+    let host = document.getElementById('toast-host');
+    if (!host) {
+        host = document.createElement('div');
+        host.id = 'toast-host';
+        document.body.appendChild(host);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${kind === 'success' ? 'success' : 'error'}`;
+    toast.textContent = message;
+
+    const close = document.createElement('button');
+    close.className = 'toast-close';
+    close.type = 'button';
+    close.textContent = '×';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.addEventListener('click', () => toast.remove());
+    toast.appendChild(close);
+
+    host.appendChild(toast);
+    if (kind === 'success') setTimeout(() => toast.remove(), 4000);
+}
+
 // =============================================================================
 // Table Sorting
 // =============================================================================
@@ -12,8 +36,10 @@ function sortKey(cell) {
 }
 
 function setupTableSorting() {
-    console.log('Setting up table sorting...');
     document.querySelectorAll('table.data-table thead th.sortable').forEach(th => {
+        if (th.dataset.sortBound) return;
+        th.dataset.sortBound = '1';
+
         th.addEventListener('click', function() {
             const table = this.closest('table');
             const tbody = table.querySelector('tbody');
@@ -152,20 +178,38 @@ function showCompareModal() {
 // =============================================================================
 // Delete Scenario
 // =============================================================================
+function adjustCount(elementId, delta) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const n = parseInt(el.textContent, 10);
+    if (!isNaN(n)) el.textContent = Math.max(0, n + delta);
+}
+
 function deleteScenario(scenarioId, scenarioName) {
     if (!confirm(`Delete scenario "${scenarioName}"?\n\nThis cannot be undone.`)) return;
-    
+
+    const row = Array.from(document.querySelectorAll('#scenarios-table tbody tr'))
+        .find(r => r.dataset.id === String(scenarioId));
+    const parent = row ? row.parentNode : null;
+    const anchor = row ? row.nextSibling : null;
+
+    if (row) {
+        row.remove();
+        adjustCount('scenarios-count', -1);
+    }
+
     fetch(`/delete_scenario/${scenarioId}`, { method: 'POST' })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                location.reload();
-            } else {
-                alert('Error: ' + (data.error || 'Unknown error'));
+        .then(res => res.json().catch(() => ({})).then(data => {
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || `Delete failed (HTTP ${res.status})`);
             }
-        })
+        }))
         .catch(err => {
-            alert('Error deleting scenario');
+            if (row && parent) {
+                parent.insertBefore(row, anchor);
+                adjustCount('scenarios-count', 1);
+            }
+            notify(`Could not delete "${scenarioName}": ${err.message}`);
             console.error(err);
         });
 }

@@ -36,7 +36,8 @@
         <div class="table-controls">
             <input type="text" id="scenario-search" placeholder="🔍 Search scenarios..." class="search-box">
             <select id="project-filter" class="filter-select"><option value="">All Projects</option></select>
-            <button onclick="showCompareModal()" class="btn-upload" style="margin-left: auto;">Compare Selected</button>
+            <button type="button" id="refresh-btn" class="btn-refresh" style="margin-left: auto;" title="Reload data from the sheet">↻ Refresh</button>
+            <button onclick="showCompareModal()" class="btn-upload">Compare Selected</button>
         </div>
         <div class="table-wrapper">
             <table class="data-table sortable" id="scenarios-table">
@@ -159,19 +160,21 @@ function fromPickerValue(value, parts, raw) {
     return `${value}:00${parts ? parts.offset : ''}`;
 }
 
-function loadData(retries) {
+function loadData(retries, done) {
     if (retries === undefined) retries = 3;
+    const finish = () => { if (typeof done === 'function') done(); };
     fetch('/api/data')
         .then(r => r.json())
         .then(data => {
             if (data.error) {
                 if (retries > 0) {
                     console.log('Data load error, retrying in 3s...', retries, 'left');
-                    setTimeout(() => loadData(retries - 1), 3000);
+                    setTimeout(() => loadData(retries - 1, done), 3000);
                     return;
                 }
                 document.getElementById('scenarios-tbody').innerHTML =
                     '<tr><td colspan="17" style="text-align:center;padding:40px;color:#991b1b;">Error loading data. Please refresh.</td></tr>';
+                finish();
                 return;
             }
             renderScenarios(data.scenarios, data.projects);
@@ -181,16 +184,18 @@ function loadData(retries) {
             setupTableSorting();
             setupColumnFilters();
             setupEditableCells();
+            finish();
         })
         .catch(err => {
             console.error('Load error:', err);
             if (retries > 0) {
                 console.log('Retrying in 3s...', retries, 'left');
-                setTimeout(() => loadData(retries - 1), 3000);
+                setTimeout(() => loadData(retries - 1, done), 3000);
                 return;
             }
             document.getElementById('scenarios-tbody').innerHTML =
                 '<tr><td colspan="17" style="text-align:center;padding:40px;color:#991b1b;">Connection error. Please refresh.</td></tr>';
+            finish();
         });
 }
 
@@ -217,12 +222,12 @@ function renderScenarios(scenarios, projects) {
             <td class="col-pin-1"><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
             <td class="col-pin-2" title="${esc(s.scenario_name)}"><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
             <td class="editable" data-field="personal_scenario_name">${esc(s.personal_scenario_name||'')}</td>
-            <td class="col-project"><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','project_name',this.value)">
+            <td class="col-project"><select class="inline-edit" data-field="project_name" data-prev="${esc(s.project_name||'')}" onchange="updateSelect(this,'${esc(s.id)}','project_name')">
                 <option value="">Select...</option>
                 ${projects.map(p=>`<option value="${esc(p)}" ${s.project_name===p?'selected':''}>${esc(p)}</option>`).join('')}
                 <option value="__new__">+ Add New</option>
             </select></td>
-            <td class="col-based-on" title="${esc(basedOn)}"><select class="inline-edit" onchange="updateScenario('${esc(s.id)}','based_on',this.value)">
+            <td class="col-based-on" title="${esc(basedOn)}"><select class="inline-edit" data-field="based_on" data-prev="${esc(basedOn)}" onchange="updateSelect(this,'${esc(s.id)}','based_on')">
                 <option value="">Select...</option>
                 ${allNames.filter(n=>n!==s.scenario_name).map(n=>`<option value="${esc(n)}" ${basedOn===n?'selected':''}>${esc(n)}</option>`).join('')}
             </select></td>
@@ -230,7 +235,7 @@ function renderScenarios(scenarios, projects) {
             <td class="editable" data-field="description">${esc(s.description||'')}</td>
             <td class="editable col-datetime" data-field="submitted" data-raw="${esc(s.submitted||'')}" data-sort-value="${tsKey(s.submitted)}" title="${esc(s.submitted||'')}">${esc(fmtDateTime(s.submitted))}</td>
             <td class="editable col-datetime" data-field="finished" data-raw="${esc(s.finished||'')}" data-sort-value="${tsKey(s.finished)}" title="${esc(s.finished||'')}">${esc(fmtDateTime(s.finished))}</td>
-            <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateScenario('${esc(s.id)}','errors',this.checked?'Yes':'')"></td>
+            <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateCheckbox(this,'${esc(s.id)}','errors')"></td>
             <td class="editable" data-field="additional_notes">${esc(s.additional_notes||'')}</td>
             <td>${esc(uploadedThrough)}</td>
             <td data-sort-value="${tsKey(s.upload_date)}" title="${esc(s.upload_date||'')}">${esc(ud)}</td>
@@ -305,7 +310,11 @@ function makeEditable(cell, save) {
         input.addEventListener('blur', function() {
             const next = usePicker ? fromPickerValue(this.value, parts, val) : this.value;
             cellCommit(cell, next);
-            if (next !== val) save(id, field, next);
+            if (next === val) return;
+            save(id, field, next).catch(err => {
+                cellCommit(cell, val);
+                notify(`Could not save ${fieldLabel(field)}: ${err.message}`);
+            });
         });
         input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
         this.textContent = ''; this.appendChild(input); input.focus();
@@ -320,16 +329,75 @@ function setupEditableCells() {
     document.querySelectorAll('#inputs-table .editable').forEach(cell => makeEditable(cell, updateInput));
 }
 
+function saveField(url, field, value) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `${field}=${encodeURIComponent(value)}`
+    }).then(res =>
+        res.json().catch(() => ({})).then(data => {
+            if (!res.ok || (data.status && data.status !== 'success')) {
+                throw new Error(data.message || `save failed (HTTP ${res.status})`);
+            }
+            return data;
+        })
+    );
+}
+
 function updateScenario(id, field, value) {
-    if (value === '__new__') {
-        const n = prompt('Enter new project name:');
-        if (n) value = n; else { if(event&&event.target) event.target.selectedIndex=0; return; }
-    }
-    fetch(`/update_scenario/${id}`, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`${field}=${encodeURIComponent(value)}` }).then(()=>location.reload());
+    return saveField(`/update_scenario/${id}`, field, value);
 }
 
 function updateInput(id, field, value) {
-    fetch(`/update_input/${id}`, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`${field}=${encodeURIComponent(value)}` });
+    return saveField(`/update_input/${id}`, field, value);
+}
+
+function fieldLabel(field) {
+    return field.replace(/_/g, ' ');
+}
+
+function updateSelect(sel, id, field) {
+    const prev = sel.dataset.prev || '';
+    let value = sel.value;
+
+    if (value === '__new__') {
+        const name = (prompt('Enter new project name:') || '').trim();
+        if (!name) { sel.value = prev; return; }
+        addProjectOption(name);
+        sel.value = name;
+        value = name;
+    }
+
+    if (value === prev) return;
+    sel.dataset.prev = value;
+
+    updateScenario(id, field, value).catch(err => {
+        sel.value = prev;
+        sel.dataset.prev = prev;
+        notify(`Could not save ${fieldLabel(field)}: ${err.message}`);
+    });
+}
+
+// Errors checkbox. Reverts the tick if the save is rejected.
+function updateCheckbox(box, id, field) {
+    const checked = box.checked;
+    updateScenario(id, field, checked ? 'Yes' : '').catch(err => {
+        box.checked = !checked;
+        notify(`Could not save ${fieldLabel(field)}: ${err.message}`);
+    });
+}
+
+function addProjectOption(name) {
+    document.querySelectorAll('select[data-field="project_name"]').forEach(sel => {
+        if (Array.from(sel.options).some(o => o.value === name)) return;
+        const addNew = Array.from(sel.options).find(o => o.value === '__new__');
+        sel.insertBefore(new Option(name, name), addNew || null);
+    });
+
+    const filter = document.getElementById('project-filter');
+    if (filter && !Array.from(filter.options).some(o => o.value === name)) {
+        filter.add(new Option(name, name));
+    }
 }
 
 document.getElementById('scenario-search').addEventListener('input', function() {
@@ -354,6 +422,22 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(t+'-tab').classList.add('active');
         this.classList.add('active');
+    });
+});
+
+document.getElementById('refresh-btn').addEventListener('click', function() {
+    const btn = this;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing...';
+
+    const wrappers = Array.from(document.querySelectorAll('.table-wrapper'));
+    const scrolls = wrappers.map(w => [w.scrollTop, w.scrollLeft]);
+
+    loadData(3, () => {
+        wrappers.forEach((w, i) => { w.scrollTop = scrolls[i][0]; w.scrollLeft = scrolls[i][1]; });
+        btn.disabled = false;
+        btn.textContent = '↻ Refresh';
     });
 });
 
