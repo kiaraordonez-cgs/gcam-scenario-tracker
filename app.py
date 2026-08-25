@@ -183,7 +183,10 @@ def parse_scenario_filename(filename):
         result['scenario_abbrev'] = '_'.join(parts[1:])
     
     return result
-GOOGLE_DRIVE_FOLDER_ID = '1RY61HJn1nWGsOlbjBE1lnbsEIH16TTfR'
+# Google Drive (Shared Drive "GCAM Scenario Tracker Files").
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '1MHMq9vN6QFktXvfo33tG2OpUlcbvblSg')
+DRIVE_CONFIGS_FOLDER_ID = os.environ.get('DRIVE_CONFIGS_FOLDER_ID', '1oXhLFZfEkd-HFKae5Og9c-0ubrFiqAiW')
+DRIVE_INPUTS_FOLDER_ID = os.environ.get('DRIVE_INPUTS_FOLDER_ID', '1Q85c9N6N6YvfeugKzr3MdqxpfK-jhAnw')
 
 ALLOWED_EXTENSIONS = {'xml'}
 
@@ -227,29 +230,99 @@ def get_google_sheets_client():
     
     return gspread.authorize(creds)
 
-def get_google_drive_client():
-    """Initialize and return Google Drive client"""
-    import os
-    import json
-    import base64
-    
-    # Get credentials
-    creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
-    
-    if creds_base64:
-        print("DEBUG: Using base64 for Drive API")
-        creds_json = base64.b64decode(creds_base64).decode('utf-8')
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    else:
+
+_drive_service = None
+
+def get_drive_service():
+    """Lazily build the Drive client, caching it for the process.
+
+    Returns None on failure rather than raising, so a Drive problem degrades
+    the affected feature instead of taking down the whole app.
+    """
+    global _drive_service
+    if _drive_service is not None:
+        return _drive_service
+    try:
+        import base64
+        from googleapiclient.discovery import build
+
+        creds_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
         creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-        if creds_json:
-            creds_dict = json.loads(creds_json)
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        if creds_base64:
+            info = json.loads(base64.b64decode(creds_base64).decode('utf-8'))
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        elif creds_json:
+            creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
         else:
             creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
-    
-    return build('drive', 'v3', credentials=creds)
+
+        _drive_service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+        return _drive_service
+    except Exception as e:
+        print(f"Error initializing Drive client: {e}")
+        return None
+
+
+def drive_available():
+    return get_drive_service() is not None
+
+
+def upload_file_to_drive(content, filename, folder_id=None, mime_type='application/xml'):
+    """Store text content in Drive and return the new file's id, or None.
+
+    A repeat upload of the same filename creates a second file rather than
+    replacing the first. That is intentional: each scenario keeps the exact
+    config it was uploaded with, even when two share a name.
+    """
+    service = get_drive_service()
+    if service is None:
+        return None
+    try:
+        from io import BytesIO
+        from googleapiclient.http import MediaIoBaseUpload
+
+        data = content.encode('utf-8') if isinstance(content, str) else content
+        media = MediaIoBaseUpload(BytesIO(data), mimetype=mime_type, resumable=False)
+        metadata = {'name': filename, 'parents': [folder_id or DRIVE_CONFIGS_FOLDER_ID]}
+        created = service.files().create(
+            body=metadata, media_body=media, fields='id', supportsAllDrives=True
+        ).execute()
+        return created.get('id')
+    except Exception as e:
+        print(f"Error uploading {filename} to Drive: {e}")
+        return None
+
+
+def download_file_from_drive(file_id):
+    """Return a Drive file's contents as text, or None if unavailable."""
+    service = get_drive_service()
+    if service is None:
+        return None
+    try:
+        data = service.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
+        return data.decode('utf-8', 'replace') if isinstance(data, bytes) else data
+    except Exception as e:
+        print(f"Error downloading {file_id} from Drive: {e}")
+        return None
+
+
+def is_legacy_file_id(file_id):
+    """Files stored before the Drive migration live in the FileStorage sheet and
+    are keyed by a small integer; Drive ids are long opaque strings."""
+    return str(file_id).strip().isdigit()
+
+
+def get_file_content(file_id):
+    """Read a stored file from whichever backend holds it.
+
+    Keeps the two storage generations working side by side so the migration
+    does not have to be atomic.
+    """
+    if file_id is None or not str(file_id).strip():
+        return None
+    if is_legacy_file_id(file_id):
+        return download_file_from_sheet(file_id)
+    return download_file_from_drive(file_id)
 
 # Initialize clients
 try:
@@ -774,6 +847,64 @@ def api_data():
         'projects': projects
     })
 
+def link_config_inputs(scenario_id, input_files, upload_date, uploaded_by='Auto-detected'):
+    """Create InputFiles rows for a config's components and link them to a
+    scenario. Shared by the website upload path and Zaratan log ingestion so
+    both produce identical data.
+
+    Batched into at most two append calls regardless of how many components a
+    config declares - one config can reference ~180 files, and a per-row write
+    would exhaust the Sheets quota immediately.
+
+    Returns {'linked': N, 'created': M}.
+    """
+    if not input_files:
+        return {'linked': 0, 'created': 0}
+
+    existing_files = {}
+    try:
+        for inp in read_input_records():
+            existing_files[inp['file_name']] = inp['id']
+    except Exception as e:
+        print(f"WARN: could not read existing input files: {e}")
+
+    new_files_to_add = []
+    junctions_to_add = []
+    next_input_id = get_next_id(inputs_sheet)
+
+    for input_file in input_files:
+        name = input_file['file_name']
+        if name in existing_files:
+            input_id = existing_files[name]
+        else:
+            input_id = next_input_id
+            new_files_to_add.append([
+                input_id,
+                name,
+                'Not analyzed',
+                'Not analyzed',
+                'Not analyzed',
+                '',  # policy_name
+                input_file.get('folder_location', ''),
+                '',  # description
+                '',  # additional_notes
+                uploaded_by,
+                upload_date,
+                ''   # file_id - set once the file itself is archived
+            ])
+            existing_files[name] = input_id
+            next_input_id += 1
+
+        junctions_to_add.append([scenario_id, input_id, input_file['component_key']])
+
+    if new_files_to_add:
+        inputs_sheet.append_rows(new_files_to_add)
+    if junctions_to_add:
+        junction_sheet.append_rows(junctions_to_add)
+
+    return {'linked': len(junctions_to_add), 'created': len(new_files_to_add)}
+
+
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
     """Upload and parse configuration XML"""
@@ -797,11 +928,10 @@ def upload_config():
         filename = secure_filename(file.filename)
         file_content = file.read().decode('utf-8')
         
-        # Store in Google Sheets
-        file_id = upload_file_to_sheet(file_content, filename)
-        
+        file_id = upload_file_to_drive(file_content, filename, DRIVE_CONFIGS_FOLDER_ID)
         if not file_id:
-            flash('Error storing file', 'error')
+            flash('Could not save the configuration to Google Drive. '
+                  'Nothing was stored, please try again.', 'error')
             return redirect(url_for('index'))
         
         # Parse configuration
@@ -843,59 +973,7 @@ def upload_config():
             ''   # based_on (col 19)
         ])
         
-        # Process input files in batch to avoid rate limits
-        # First, get all existing input file names in one call
-        existing_files = {}
-        try:
-            all_inputs = read_input_records()
-            for inp in all_inputs:
-                existing_files[inp['file_name']] = inp['id']
-        except:
-            pass
-        
-        # Prepare batch data for new files and junctions
-        new_files_to_add = []
-        junctions_to_add = []
-        next_input_id = get_next_id(inputs_sheet)
-        
-        for input_file in parsed['input_files']:
-            # Check if exists
-            if input_file['file_name'] in existing_files:
-                input_id = existing_files[input_file['file_name']]
-            else:
-                # Prepare to add new
-                input_id = next_input_id
-                new_files_to_add.append([
-                    input_id,
-                    input_file['file_name'],
-                    'Not analyzed',
-                    'Not analyzed',
-                    'Not analyzed',
-                    '',  # policy_name
-                    input_file.get('folder_location', ''),  # folder_location from config
-                    '',  # description
-                    '',  # additional_notes
-                    'Auto-detected',
-                    upload_date,
-                    ''   # file_id
-                ])
-                existing_files[input_file['file_name']] = input_id
-                next_input_id += 1
-            
-            # Prepare junction
-            junctions_to_add.append([
-                scenario_id,
-                input_id,
-                input_file['component_key']
-            ])
-        
-        # Batch add new input files (single API call)
-        if new_files_to_add:
-            inputs_sheet.append_rows(new_files_to_add)
-        
-        # Batch add junctions (single API call)
-        if junctions_to_add:
-            junction_sheet.append_rows(junctions_to_add)
+        link_config_inputs(scenario_id, parsed['input_files'], upload_date)
         
         # Build descriptive flash message
         auto_filled = []
@@ -1124,8 +1202,8 @@ def download_file(file_type, file_id):
             sheet_file_id = scenario['config_file_id']
             filename = f"{scenario['scenario_name']}.xml"
             
-            # Download from Sheets
-            content = download_file_from_sheet(sheet_file_id)
+           
+            content = get_file_content(sheet_file_id)
             
             if not content:
                 flash('Error downloading file', 'error')
@@ -1170,7 +1248,7 @@ def migrate_folder_locations():
                 continue
             
             # Get the config file content
-            config_content = download_file_from_sheet(config_file_id)
+            config_content = get_file_content(config_file_id)
             if not config_content:
                 continue
             
@@ -1870,6 +1948,157 @@ def scenario_fields_from_log(record):
             f['errors'] = errors
     return f
 
+def apply_config_from_logs(records, scenario_ids):
+    """For log records that carry the run's configuration XML, archive it to
+    Drive and link the input files it declares to the scenario.
+
+    This is what gives Zaratan runs the same input-file listing that a website
+    upload produces. Without it the tracker knows a run happened but not what
+    went into it.
+
+    Skips a scenario that already has a config recorded, so re-sending a log
+    never duplicates junction rows. Returns a summary dict.
+    """
+    if scenarios_sheet is None:
+        return {'configs': 0, 'linked': 0, 'skipped': 0, 'errors': 0}
+
+    header = scenarios_sheet.row_values(1)
+    try:
+        col_config = header.index('config_file_id') + 1
+        id_idx = header.index('id')
+        cfg_idx = header.index('config_file_id')
+    except ValueError:
+        return {'configs': 0, 'linked': 0, 'skipped': 0, 'errors': 0}
+
+    # Which scenarios already have a config, and where their row is
+    rows = scenarios_sheet.get_all_values()
+    row_of, has_config = {}, set()
+    for n, row in enumerate(rows[1:], start=2):
+        if len(row) > id_idx:
+            sid = str(row[id_idx]).strip()
+            if sid:
+                row_of[sid] = n
+                if len(row) > cfg_idx and str(row[cfg_idx]).strip():
+                    has_config.add(sid)
+
+    summary = {'configs': 0, 'linked': 0, 'skipped': 0, 'errors': 0}
+    updates = []
+    upload_date = datetime.now().isoformat()
+
+    # One config per job_id; a restart re-sends the same one
+    seen_jobs = set()
+    for rec in records:
+        content = rec.get('config_content')
+        jid = str(rec.get('job_id', '')).strip()
+        if not content or not jid or jid in seen_jobs:
+            continue
+        seen_jobs.add(jid)
+
+        scenario_id = scenario_ids.get(jid)
+        if not scenario_id:
+            summary['skipped'] += 1
+            continue
+        if scenario_id in has_config:
+            summary['skipped'] += 1
+            continue
+
+        try:
+            parsed = parse_configuration_xml(content)
+        except Exception as e:
+            print(f"WARN: could not parse config for job {jid}: {e}")
+            summary['errors'] += 1
+            continue
+
+        filename = rec.get('config_file') or f'configuration_{jid}.xml'
+        filename = os.path.basename(filename)
+        file_id = upload_file_to_drive(content, filename, DRIVE_CONFIGS_FOLDER_ID)
+        if not file_id:
+            print(f"WARN: Drive upload failed for job {jid}; not linking inputs")
+            summary['errors'] += 1
+            continue
+
+        result = link_config_inputs(scenario_id, parsed.get('input_files', []), upload_date)
+        summary['configs'] += 1
+        summary['linked'] += result['linked']
+
+        row_num = row_of.get(scenario_id)
+        if row_num:
+            updates.append({'range': gspread.utils.rowcol_to_a1(row_num, col_config),
+                            'values': [[file_id]]})
+
+    if updates:
+        scenarios_sheet.batch_update(updates)
+
+    return summary
+
+
+# Written when the cluster parser ran but could not determine the outcome.
+SOLVE_UNKNOWN_NOTE = 'Solve status unknown'
+
+
+def _fmt_list(values, limit=8):
+    """Comma-joined list, abbreviated once it gets long enough to be unreadable."""
+    vals = [str(v) for v in values]
+    if len(vals) <= limit:
+        return ', '.join(vals)
+    return ', '.join(vals[:limit]) + f' (+{len(vals) - limit} more)'
+
+
+def solve_note(record):
+    """Error-notes text derived from a log record's `solve` block.
+
+    Returns '' when the record carries no solve information at all, so nothing
+    is written for logs predating the cluster-side parser.
+
+    'unknown' is rendered explicitly rather than left blank: a run whose log
+    could not be read must never be indistinguishable from one that solved.
+    """
+    solve = record.get('solve')
+    if not isinstance(solve, dict):
+        return ''
+
+    status = str(solve.get('status', '')).strip().lower()
+    total = solve.get('periods_total')
+
+    if status == 'solved':
+        return f'All {total} periods solved' if total else 'Solved'
+
+    if status == 'failed':
+        years = solve.get('years_failed') or []
+        periods = solve.get('periods_failed') or []
+
+        if years:
+            which = _fmt_list(years)
+        elif periods:
+            which = 'period ' + _fmt_list(periods)
+        else:
+            which = ''
+
+        count = len(years) or len(periods)
+        if count and total:
+            head = f'{count} of {total} periods failed'
+        elif count:
+            head = f'{count} period{"s" if count != 1 else ""} failed'
+        else:
+            head = "Didn't solve"
+
+        note = f'{head}: {which}' if which else head
+
+        # Calibration is only worth calling out when it is a different story
+        # from the solve failures - usually the two sets coincide.
+        uncal = solve.get('periods_uncalibrated') or []
+        if uncal and sorted(uncal) != sorted(periods):
+            note += '; calibration failed in period ' + _fmt_list(uncal)
+
+        return note
+
+    if status == 'unknown':
+        return SOLVE_UNKNOWN_NOTE
+
+    # Unrecognised status - say nothing rather than guess
+    return ''
+
+
 def apply_scenario_upserts(records):
     """Reflect ingested log records into the Scenarios sheet, keyed by job_id.
     'started' creates/populates the row; 'finished' updates the same row in place.
@@ -1893,43 +2122,72 @@ def apply_scenario_upserts(records):
     # Rows with an empty job_id (e.g. website config uploads) are ignored, so a
     # log always gets its own row rather than attaching to an unrelated one.
     existing_rownum = {}
+    existing_scenario_id = {}   # job_id -> scenario id, for linking config inputs
+    id_idx = col.get('id')
     for i, row in enumerate(values[1:], start=2):
         if len(row) > jid_idx:
             jid = str(row[jid_idx]).strip()
             if jid:
                 existing_rownum[jid] = i
+                if id_idx is not None and len(row) > id_idx:
+                    existing_scenario_id[jid] = str(row[id_idx]).strip()
 
     pending_new = {}      # job_id -> full row list (appended at the end)
     updates = []          # (row_number, col_idx0, value) for existing rows
+
+    notes_idx = col.get('additional_notes')
 
     for rec in records:
         jid = str(rec.get('job_id', '')).strip()
         if not jid:
             continue
         fields = scenario_fields_from_log(rec)
+
+        # Error notes are deliberately kept out of `fields`: everything in
+        # there overwrites unconditionally, and a note someone typed by hand
+        # must survive. 
+        note = solve_note(rec)
+
         if jid in existing_rownum:
             rownum = existing_rownum[jid]
             for name, val in fields.items():
                 if val != '' and name in col:
                     updates.append((rownum, col[name], val))
+
+            if note and notes_idx is not None:
+                current = ''
+                sheet_row = values[rownum - 1] if rownum - 1 < len(values) else []
+                if len(sheet_row) > notes_idx:
+                    current = str(sheet_row[notes_idx]).strip()
+                # Fill only when empty, or when replacing our own placeholder
+                if current == '' or current == SOLVE_UNKNOWN_NOTE:
+                    updates.append((rownum, notes_idx, note))
         elif jid in pending_new:
             row = pending_new[jid]
             for name, val in fields.items():
                 if val != '' and name in col:
                     row[col[name]] = val
+            if note and notes_idx is not None:
+                existing_note = str(row[notes_idx]).strip()
+                if existing_note == '' or existing_note == SOLVE_UNKNOWN_NOTE:
+                    row[notes_idx] = note
         else:
             row = [''] * len(header)
+            new_id = str(uuid.uuid4())[:8]
             base = {
-                'id': str(uuid.uuid4())[:8],
+                'id': new_id,
                 # 'Zaratan' is the value the dashboard's "Uploaded through" column
                 # recognizes as the cluster channel (else it shows "Website").
                 'uploaded_by': 'Zaratan',
                 'upload_date': datetime.now().isoformat(),
             }
+            if note:
+                base['additional_notes'] = note
             for name, val in {**base, **fields}.items():
                 if val != '' and name in col:
                     row[col[name]] = val
             pending_new[jid] = row
+            existing_scenario_id[jid] = new_id
 
     if pending_new:
         scenarios_sheet.append_rows(list(pending_new.values()))
@@ -1937,7 +2195,13 @@ def apply_scenario_upserts(records):
         batch = [{'range': rowcol_to_a1(r, c + 1), 'values': [[v]]} for (r, c, v) in updates]
         scenarios_sheet.batch_update(batch)
 
-    return {'created': len(pending_new), 'updated': len(set(u[0] for u in updates))}
+    return {
+        'created': len(pending_new),
+        'updated': len(set(u[0] for u in updates)),
+        # job_id -> scenario id, so the caller can attach config inputs to the
+        # right scenario without re-reading the sheet
+        'scenario_ids': existing_scenario_id,
+    }
 
 @app.route('/ingest_logs', methods=['POST'])
 def ingest_logs():
@@ -1997,15 +2261,19 @@ def ingest_logs():
         if rows:
             zaratan_logs_sheet.append_rows(rows)
         scenarios = {'created': 0, 'updated': 0}
+        configs = {'configs': 0, 'linked': 0, 'skipped': 0, 'errors': 0}
         scenarios_error = None
         try:
             scenarios = apply_scenario_upserts(new_records)
+            # Logs that carry the run's config give the scenario its input files
+            configs = apply_config_from_logs(new_records, scenarios.get('scenario_ids', {}))
             invalidate_cache()
         except Exception as se:
             scenarios_error = str(se)
 
+        scenarios_summary = {k: v for k, v in scenarios.items() if k != 'scenario_ids'}
         result = {'status': 'ok', 'received': len(rows), 'skipped': skipped,
-                  'scenarios': scenarios}
+                  'scenarios': scenarios_summary, 'configs': configs}
         if scenarios_error:
             result['scenarios_error'] = scenarios_error
         return jsonify(result)

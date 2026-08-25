@@ -236,7 +236,7 @@ function renderScenarios(scenarios, projects) {
             <td class="editable col-datetime" data-field="submitted" data-raw="${esc(s.submitted||'')}" data-sort-value="${tsKey(s.submitted)}" title="${esc(s.submitted||'')}">${esc(fmtDateTime(s.submitted))}</td>
             <td class="editable col-datetime" data-field="finished" data-raw="${esc(s.finished||'')}" data-sort-value="${tsKey(s.finished)}" title="${esc(s.finished||'')}">${esc(fmtDateTime(s.finished))}</td>
             <td style="text-align:center"><input type="checkbox" class="error-checkbox" ${s.errors?'checked':''} onchange="updateCheckbox(this,'${esc(s.id)}','errors')"></td>
-            <td class="editable" data-field="additional_notes">${esc(s.additional_notes||'')}</td>
+            <td class="editable" data-field="additional_notes" title="${esc(s.additional_notes||'')}">${esc(s.additional_notes||'')}</td>
             <td>${esc(uploadedThrough)}</td>
             <td data-sort-value="${tsKey(s.upload_date)}" title="${esc(s.upload_date||'')}">${esc(ud)}</td>
             <td class="editable" data-field="job_id">${esc(s.job_id||'')}</td>
@@ -287,6 +287,7 @@ function cellCommit(cell, value) {
         cell.textContent = fmtDateTime(value);
     } else {
         cell.textContent = value;
+        if (cell.hasAttribute('title')) cell.title = value;
     }
 }
 
