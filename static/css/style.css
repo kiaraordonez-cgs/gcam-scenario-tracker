@@ -730,3 +730,32 @@ select.inline-edit {
     opacity: 0.6;
     cursor: default;
 }
+
+.data-table td.editing {
+    white-space: normal;
+    overflow: visible;
+    vertical-align: top;
+    background: white;
+}
+
+textarea.inline-edit {
+    width: 100%;
+    min-height: 4.5em;
+    resize: vertical;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+    font-family: inherit;
+    line-height: 1.4;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: white;
+    color: #111;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+textarea.inline-edit:focus {
+    outline: none;
+    border-color: #dc2626;
+    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}

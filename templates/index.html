@@ -141,6 +141,7 @@ function tsKey(val) {
 }
 
 const DATETIME_FIELDS = new Set(['submitted', 'finished']);
+const WRAP_FIELDS = new Set(['additional_notes', 'description']);
 
 function splitTimestamp(val) {
     const s = String(val == null ? '' : val).trim();
@@ -304,8 +305,10 @@ function makeEditable(cell, save) {
     cell.addEventListener('click', function() {
         if (this.querySelector('input')) return;
         const val = cellEditValue(this), field = this.dataset.field, id = this.closest('tr').dataset.id;
-        const input = document.createElement('input');
+        const wraps = WRAP_FIELDS.has(field);
+        const input = document.createElement(wraps ? 'textarea' : 'input');
         input.className = 'inline-edit';
+        if (wraps) cell.classList.add('editing');
 
         const parts = DATETIME_FIELDS.has(field) ? splitTimestamp(val) : null;
         const usePicker = DATETIME_FIELDS.has(field) && (parts !== null || val === '');
@@ -318,6 +321,7 @@ function makeEditable(cell, save) {
         }
 
         input.addEventListener('blur', function() {
+            cell.classList.remove('editing');
             const next = usePicker ? fromPickerValue(this.value, parts, val) : this.value;
             cellCommit(cell, next);
             if (next === val) return;
@@ -326,7 +330,16 @@ function makeEditable(cell, save) {
                 notify(`Could not save ${fieldLabel(field)}: ${err.message}`);
             });
         });
-        input.addEventListener('keypress', function(e) { if (e.key==='Enter') this.blur(); });
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.blur();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.value = usePicker ? toPickerValue(parts) : val;
+                this.blur();
+            }
+        });
         this.textContent = ''; this.appendChild(input); input.focus();
         if (usePicker && typeof input.showPicker === 'function') {
             try { input.showPicker(); } catch (e) { /* keyboard entry still works */ }
