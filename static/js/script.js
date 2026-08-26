@@ -106,11 +106,8 @@ function setupColumnFilters() {
             // Collect unique values
             const values = new Set();
             tbody.querySelectorAll('tr').forEach(row => {
-                const cell = row.cells[colIdx];
-                if (cell) {
-                    const val = cell.textContent.trim();
-                    if (val && val !== '') values.add(val);
-                }
+                const val = cellFilterText(row.cells[colIdx]);
+                if (val) values.add(val);
             });
             
             const select = document.createElement('select');
@@ -144,21 +141,46 @@ function setupColumnFilters() {
     });
 }
 
-function applyFilters(table) {
-    const filters = Array.from(table.querySelectorAll('.filter-row .column-filter'));
-    const rows = table.querySelectorAll('tbody tr');
-    
-    rows.forEach(row => {
+function cellFilterText(cell) {
+    if (!cell) return '';
+    const select = cell.querySelector('select');
+    if (select) return (select.value || '').trim();
+    return (cell.textContent || '').trim();
+}
+
+function applyRowVisibility(table) {
+    if (!table) return;
+
+    const isScenarios = table.id === 'scenarios-table';
+    const searchBox = document.getElementById(isScenarios ? 'scenario-search' : 'input-search');
+    const term = ((searchBox && searchBox.value) || '').trim().toLowerCase();
+
+    const projectSelect = isScenarios ? document.getElementById('project-filter') : null;
+    const project = (projectSelect && projectSelect.value) || '';
+
+    const filters = Array.from(table.querySelectorAll('.filter-row .column-filter'))
+        .filter(f => f.value);
+
+    table.querySelectorAll('tbody tr').forEach(row => {
         let show = true;
-        filters.forEach(filter => {
-            const val = filter.value;
-            if (!val) return;
-            const colIdx = parseInt(filter.dataset.columnIndex);
-            const cell = row.cells[colIdx];
-            if (!cell || cell.textContent.trim() !== val) show = false;
-        });
+
+        if (term && !(row.dataset.search || '').includes(term)) show = false;
+        if (show && project && row.dataset.project !== project) show = false;
+
+        if (show) {
+            for (const filter of filters) {
+                const cell = row.cells[parseInt(filter.dataset.columnIndex, 10)];
+                if (cellFilterText(cell) !== filter.value) { show = false; break; }
+            }
+        }
+
         row.style.display = show ? '' : 'none';
     });
+}
+
+// Kept as an alias: setupColumnFilters and any older callers still say applyFilters.
+function applyFilters(table) {
+    applyRowVisibility(table);
 }
 
 // =============================================================================

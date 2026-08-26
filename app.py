@@ -2034,6 +2034,7 @@ def apply_config_from_logs(records, scenario_ids):
 
 # Written when the cluster parser ran but could not determine the outcome.
 SOLVE_UNKNOWN_NOTE = 'Solve status unknown'
+MANY_MARKETS_THRESHOLD = 3
 
 
 def _fmt_list(values, limit=8):
@@ -2044,11 +2045,73 @@ def _fmt_list(values, limit=8):
     return ', '.join(vals[:limit]) + f' (+{len(vals) - limit} more)'
 
 
+def _group_failures(failures):
+    """Split failure entries into base years and model years, tallying how many
+    involved many vs few unsolved markets.
+
+    markets_unsolved is None when the log named a period in its summary but the
+    market list was missing or truncated. Those are tallied separately: not
+    knowing how bad a failure was is not the same as it being small.
+    """
+    groups = {
+        'base':  {'many': 0, 'few': 0, 'unknown': 0, 'years': [], 'has_year': False},
+        'model': {'many': 0, 'few': 0, 'unknown': 0, 'years': [], 'has_year': False},
+    }
+    for entry in failures:
+        if not isinstance(entry, dict):
+            continue
+        group = groups['base'] if entry.get('base_year') else groups['model']
+        year = entry.get('year')
+        if year is not None:
+            group['years'].append(str(year))
+            group['has_year'] = True
+        elif entry.get('period') is not None:
+            group['years'].append(f"period {entry['period']}")
+
+        markets = entry.get('markets_unsolved')
+        if markets is None:
+            group['unknown'] += 1
+        elif markets >= MANY_MARKETS_THRESHOLD:
+            group['many'] += 1
+        else:
+            group['few'] += 1
+    return groups
+
+
+def _group_phrase(label, group):
+    """e.g. '2 base years failed: 2019, 2020 (1 many markets, 1 few)'."""
+    total = group['many'] + group['few'] + group['unknown']
+    if not total:
+        return ''
+
+    unit = 'year' if group.get('has_year') else 'period'
+    noun = f'{label} {unit}' if total == 1 else f'{label} {unit}s'
+    phrase = f'{total} {noun} failed'
+
+    if group['years']:
+        phrase += ': ' + _fmt_list(group['years'])
+
+    breakdown = []
+    if group['many']:
+        breakdown.append(f"{group['many']} many markets")
+    if group['few']:
+        breakdown.append(f"{group['few']} few")
+    if group['unknown']:
+        breakdown.append(f"{group['unknown']} market count unknown")
+    # A single failure with a known size adds nothing by restating the count
+    if breakdown and not (total == 1 and group['unknown'] == 0):
+        phrase += ' (' + ', '.join(breakdown) + ')'
+
+    return phrase
+
+
 def solve_note(record):
     """Error-notes text derived from a log record's `solve` block.
 
-    Returns '' when the record carries no solve information at all, so nothing
-    is written for logs predating the cluster-side parser.
+    Handles both parser shapes: the newer `failures[]` array (per-period market
+    counts and a base_year flag) and the older parallel `periods_failed` /
+    `years_failed` lists. Returns '' when the record carries no solve
+    information at all, so nothing is written for logs predating the parser.
 
     'unknown' is rendered explicitly rather than left blank: a run whose log
     could not be read must never be indistinguishable from one that solved.
@@ -2064,9 +2127,20 @@ def solve_note(record):
         return f'All {total} periods solved' if total else 'Solved'
 
     if status == 'failed':
+        failures = solve.get('failures')
+
+        # Newer shape: per-period detail, so base and model years can be
+        # reported separately with how many markets each involved.
+        if isinstance(failures, list) and failures:
+            groups = _group_failures(failures)
+            parts = [p for p in (_group_phrase('base', groups['base']),
+                                 _group_phrase('model', groups['model'])) if p]
+            if parts:
+                return '; '.join(parts)
+
+        # Older shape: flat lists, no market counts and no base/model split.
         years = solve.get('years_failed') or []
         periods = solve.get('periods_failed') or []
-
         if years:
             which = _fmt_list(years)
         elif periods:
@@ -2082,15 +2156,7 @@ def solve_note(record):
         else:
             head = "Didn't solve"
 
-        note = f'{head}: {which}' if which else head
-
-        # Calibration is only worth calling out when it is a different story
-        # from the solve failures - usually the two sets coincide.
-        uncal = solve.get('periods_uncalibrated') or []
-        if uncal and sorted(uncal) != sorted(periods):
-            note += '; calibration failed in period ' + _fmt_list(uncal)
-
-        return note
+        return f'{head}: {which}' if which else head
 
     if status == 'unknown':
         return SOLVE_UNKNOWN_NOTE

@@ -159,6 +159,9 @@ function fromPickerValue(value, parts, raw) {
     if (parts && toPickerValue(parts) === value) return raw;
     return `${value}:00${parts ? parts.offset : ''}`;
 }
+function searchBlob(fields) {
+    return fields.filter(v => v != null && v !== '').join(' ').toLowerCase();
+}
 
 function loadData(retries, done) {
     if (retries === undefined) retries = 3;
@@ -218,7 +221,10 @@ function renderScenarios(scenarios, projects) {
         // "Uploaded through" is fixed: legacy Manual/User -> Website
         const uploadedThrough = (ub === 'Zaratan') ? 'Zaratan' : 'Website';
         const basedOn = s.based_on || '';
-        return `<tr data-id="${esc(s.id)}" data-project="${esc(s.project_name||'')}">
+        const blob = searchBlob([s.scenario_name, s.personal_scenario_name, s.project_name,
+                                s.based_on, s.person, s.description, s.additional_notes,
+                                s.job_id, uploadedThrough]);
+        return `<tr data-id="${esc(s.id)}" data-project="${esc(s.project_name||'')}" data-search="${esc(blob)}">
             <td class="col-pin-1"><input type="checkbox" class="compare-checkbox" value="${esc(s.id)}"></td>
             <td class="col-pin-2" title="${esc(s.scenario_name)}"><a href="/scenario/${esc(s.id)}">${esc(s.scenario_name)}</a></td>
             <td class="editable" data-field="personal_scenario_name">${esc(s.personal_scenario_name||'')}</td>
@@ -258,7 +264,10 @@ function renderInputFiles(inputs) {
     }
     tbody.innerHTML = inputs.map(inp => {
         const ud = fmtDate(inp.upload_date);
-        return `<tr data-id="${esc(inp.id)}">
+        const blob = searchBlob([inp.file_name, inp.regions_modified, inp.years_modified,
+                                inp.sectors_modified, inp.policy_name, inp.folder_location,
+                                inp.description, inp.additional_notes, inp.uploaded_by]);
+        return `<tr data-id="${esc(inp.id)}" data-search="${esc(blob)}">
             <td class="col-pin-1" title="${esc(inp.file_name)}"><a href="/input/${esc(inp.id)}">${esc(inp.file_name)}</a></td>
             <td>${esc(inp.regions_modified||'N/A')}</td>
             <td>${esc(inp.years_modified||'N/A')}</td>
@@ -402,16 +411,13 @@ function addProjectOption(name) {
 }
 
 document.getElementById('scenario-search').addEventListener('input', function() {
-    const s = this.value.toLowerCase();
-    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => { r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none'; });
+    applyRowVisibility(document.getElementById('scenarios-table'));
 });
 document.getElementById('input-search').addEventListener('input', function() {
-    const s = this.value.toLowerCase();
-    document.querySelectorAll('#inputs-table tbody tr').forEach(r => { r.style.display = r.textContent.toLowerCase().includes(s) ? '' : 'none'; });
+    applyRowVisibility(document.getElementById('inputs-table'));
 });
 document.getElementById('project-filter').addEventListener('change', function() {
-    const v = this.value;
-    document.querySelectorAll('#scenarios-table tbody tr').forEach(r => { r.style.display = (!v||r.dataset.project===v) ? '' : 'none'; });
+    applyRowVisibility(document.getElementById('scenarios-table'));
 });
 document.getElementById('select-all-scenarios').addEventListener('change', function() {
     document.querySelectorAll('.compare-checkbox').forEach(cb => cb.checked = this.checked);
