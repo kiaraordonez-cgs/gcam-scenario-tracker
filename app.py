@@ -2034,10 +2034,9 @@ def apply_config_from_logs(records, scenario_ids):
 
 # Written when the cluster parser ran but could not determine the outcome.
 SOLVE_UNKNOWN_NOTE = 'Solve status unknown'
-MANY_MARKETS_THRESHOLD = 3
 
 
-def _fmt_list(values, limit=8):
+def _fmt_list(values, limit=6):
     """Comma-joined list, abbreviated once it gets long enough to be unreadable."""
     vals = [str(v) for v in values]
     if len(vals) <= limit:
@@ -2045,64 +2044,50 @@ def _fmt_list(values, limit=8):
     return ', '.join(vals[:limit]) + f' (+{len(vals) - limit} more)'
 
 
-def _group_failures(failures):
-    """Split failure entries into base years and model years, tallying how many
-    involved many vs few unsolved markets.
+def _failure_label(entry):
+    """One failed period, e.g. '2019 (4 markets)'.
 
-    markets_unsolved is None when the log named a period in its summary but the
-    market list was missing or truncated. Those are tallied separately: not
-    knowing how bad a failure was is not the same as it being small.
+    The market count is printed outright rather than bucketed into "many" or
+    "few". The reader sees the actual number, so there is no threshold to agree
+    on and nothing to misread at a glance.
+
+    A None count means the log named the period but its market list was missing
+    or truncated. Said explicitly, because not knowing is not the same as zero.
     """
+    year = entry.get('year')
+    where = str(year) if year is not None else f"period {entry.get('period')}"
+
+    markets = entry.get('markets_unsolved')
+    if markets is None:
+        return f'{where} (markets unknown)'
+    return f'{where} ({markets} market{"" if markets == 1 else "s"})'
+
+
+def _group_failures(failures):
+    """Split failure entries into base years and model years, preserving order."""
     groups = {
-        'base':  {'many': 0, 'few': 0, 'unknown': 0, 'years': [], 'has_year': False},
-        'model': {'many': 0, 'few': 0, 'unknown': 0, 'years': [], 'has_year': False},
+        'base':  {'labels': [], 'has_year': False},
+        'model': {'labels': [], 'has_year': False},
     }
     for entry in failures:
         if not isinstance(entry, dict):
             continue
         group = groups['base'] if entry.get('base_year') else groups['model']
-        year = entry.get('year')
-        if year is not None:
-            group['years'].append(str(year))
+        group['labels'].append(_failure_label(entry))
+        if entry.get('year') is not None:
             group['has_year'] = True
-        elif entry.get('period') is not None:
-            group['years'].append(f"period {entry['period']}")
-
-        markets = entry.get('markets_unsolved')
-        if markets is None:
-            group['unknown'] += 1
-        elif markets >= MANY_MARKETS_THRESHOLD:
-            group['many'] += 1
-        else:
-            group['few'] += 1
     return groups
 
 
 def _group_phrase(label, group):
-    """e.g. '2 base years failed: 2019, 2020 (1 many markets, 1 few)'."""
-    total = group['many'] + group['few'] + group['unknown']
+    """e.g. '2 base years failed: 2019 (4 markets), 2020 (1 market)'."""
+    total = len(group['labels'])
     if not total:
         return ''
-
-    unit = 'year' if group.get('has_year') else 'period'
+    unit = 'year' if group['has_year'] else 'period'
     noun = f'{label} {unit}' if total == 1 else f'{label} {unit}s'
-    phrase = f'{total} {noun} failed'
+    return f'{total} {noun} failed: ' + _fmt_list(group['labels'])
 
-    if group['years']:
-        phrase += ': ' + _fmt_list(group['years'])
-
-    breakdown = []
-    if group['many']:
-        breakdown.append(f"{group['many']} many markets")
-    if group['few']:
-        breakdown.append(f"{group['few']} few")
-    if group['unknown']:
-        breakdown.append(f"{group['unknown']} market count unknown")
-    # A single failure with a known size adds nothing by restating the count
-    if breakdown and not (total == 1 and group['unknown'] == 0):
-        phrase += ' (' + ', '.join(breakdown) + ')'
-
-    return phrase
 
 
 def solve_note(record):
