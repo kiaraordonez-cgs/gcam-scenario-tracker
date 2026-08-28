@@ -140,6 +140,21 @@ function tsKey(val) {
     return d ? d.getTime() : '';
 }
 
+function recencyKey(vals) {
+    for (const v of vals) {
+        const d = parseTs(v);
+        if (d) return d.getTime();
+    }
+    return -Infinity;
+}
+
+function byNewestFirst(pick) {
+    return (a, b) => {
+        const ka = recencyKey(pick(a)), kb = recencyKey(pick(b));
+        return ka === kb ? 0 : kb - ka;
+    };
+}
+
 const DATETIME_FIELDS = new Set(['submitted', 'finished']);
 const WRAP_FIELDS = new Set(['additional_notes', 'description']);
 
@@ -213,6 +228,9 @@ function renderScenarios(scenarios, projects) {
         tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;padding:40px;color:#6b7280;">No scenarios yet.</td></tr>';
         return;
     }
+
+    scenarios = scenarios.slice().sort(byNewestFirst(s => [s.finished, s.submitted, s.upload_date]));
+
     // Build list of all scenario names for the "Based on" dropdown
     const allNames = scenarios.map(x => x.scenario_name).filter(n => n);
     
@@ -263,6 +281,8 @@ function renderInputFiles(inputs) {
         tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:40px;color:#6b7280;">No input files yet.</td></tr>';
         return;
     }
+    inputs = inputs.slice().sort(byNewestFirst(inp => [inp.upload_date]));
+
     tbody.innerHTML = inputs.map(inp => {
         const ud = fmtDate(inp.upload_date);
         const blob = searchBlob([inp.file_name, inp.regions_modified, inp.years_modified,
